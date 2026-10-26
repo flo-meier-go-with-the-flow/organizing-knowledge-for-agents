@@ -20,7 +20,10 @@ ERB_ROOT = Path(os.environ.get("ERB_ROOT", PROJECT_ROOT.parent / "EnterpriseRAG-
 CHROMA_DIR = Path(os.environ.get("CHROMA_DIR", PROJECT_ROOT / "data" / "chroma")).resolve()
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", PROJECT_ROOT / "runs")).resolve()
 
-VOYAGE_MODEL = os.environ.get("VOYAGE_MODEL", "voyage-4-large")
+# Embedding endpoint: an NVIDIA NIM serving Nemotron Embed (OpenAI-compatible API).
+EMBED_BASE_URL = os.environ.get("EMBED_BASE_URL", "")
+EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
 
 
 @dataclass
@@ -39,7 +42,7 @@ class RetrievalConfig:
     candidates: int = 50  # per retriever, before fusion
     rrf_k: int = 60
     text_variant: str = "m0"  # which document rendering was indexed (see corpus.render_text)
-    embedding_model: str = VOYAGE_MODEL
+    embedding_model: str = EMBED_MODEL
 
 
 @dataclass

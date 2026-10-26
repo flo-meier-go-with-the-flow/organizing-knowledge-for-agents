@@ -1,4 +1,4 @@
-"""Hybrid search: Voyage dense retrieval (Chroma) + BM25, fused with reciprocal rank fusion."""
+"""Hybrid search: Nemotron dense retrieval (Chroma) + BM25, fused with reciprocal rank fusion."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from dataclasses import dataclass
 
 import bm25s
 import numpy as np
-import voyageai
 
 from organizing_knowledge_for_agents.corpus import Doc, load_corpus, render_text
+from organizing_knowledge_for_agents.embeddings import Embedder
 from organizing_knowledge_for_agents.index import get_collection
 from organizing_knowledge_for_agents.settings import RetrievalConfig
 
@@ -37,7 +37,7 @@ class Searcher:
                     f"Chroma collection {self.collection.name} has {self.collection.count()} docs, "
                     f"corpus has {len(self.corpus)}. Run `python -m organizing_knowledge_for_agents.index` first."
                 )
-            self.voyage = voyageai.Client(max_retries=5)
+            self.embedder = Embedder(cfg.embedding_model)
 
     def _bm25_ranking(self, query: str) -> list[str]:
         tokens = bm25s.tokenize(query, stopwords="en", return_ids=False, show_progress=False)[0]
@@ -48,7 +48,7 @@ class Searcher:
         return [self.doc_ids[i] for i in top if scores[i] > 0]
 
     def _dense_ranking(self, query: str) -> list[str]:
-        embedding = self.voyage.embed([query], model=self.cfg.embedding_model, input_type="query").embeddings[0]
+        embedding = self.embedder.embed([query], input_type="query")[0]
         result = self.collection.query(query_embeddings=[embedding], n_results=self.cfg.candidates, include=[])
         return result["ids"][0]
 

@@ -63,7 +63,8 @@ Order: pilot (10 questions) → baseline → one-factor-at-a-time sweeps → sma
 ## Decisions
 
 - **Stack:**
-  - Chroma for vectors, Voyage `voyage-4-large` for embeddings, in-memory BM25, fused with RRF.
+  - Chroma for vectors, NVIDIA `nemotron-3-embed-1b` (self-hosted NIM) for embeddings, in-memory BM25, fused with RRF.
+  - Embedding inputs over the NIM's 4,096-token limit are truncated (`truncate="END"`, about 2% of pages).
   - A small OpenAI model from the company deployment runs the agent loop (Responses API) and writes answers.
 - **Baseline tools:**
   - `search`: top 5, full text, no metadata
@@ -78,7 +79,7 @@ Order: pilot (10 questions) → baseline → one-factor-at-a-time sweeps → sma
 
 Setup
 - [ ] Choose the agent model and endpoint (OpenAI vs Azure → `OPENAI_BASE_URL`) and set it in `configs/baseline.toml`.
-- [ ] Confirm Voyage is approved, or switch to the embedding model we'd deploy.
+- [ ] Get the Nemotron NIM endpoint from IT, plus its NIM version, served model ID and max sequence length. Revisit truncation vs splitting if the limit is 4,096.
 - [ ] Choose and pin the judge model.
 - [ ] Decide repo visibility, and whether the benchmark corpus stays committed in a public repo.
 - [ ] Set up the GitLab mirror from GitHub.
