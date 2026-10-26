@@ -1,0 +1,22 @@
+# Baseline: agentic RAG with hybrid search that returns full documents, no metadata.
+# Grid cells are copies of this file with one dimension changed; keep `name` unique.
+name = "baseline"
+
+[agent]
+model = "gpt-5-mini"          # set to your company deployment (or override with --model)
+reasoning_effort = "medium"   # "" for non-reasoning models
+max_tool_calls = 15
+max_output_tokens = 16000
+
+[retrieval]
+mode = "hybrid"               # hybrid | dense | bm25
+k = 5
+candidates = 50
+rrf_k = 60
+text_variant = "m0"           # title + content; must match an indexed collection
+embedding_model = "voyage-4-large"
+
+[tools]
+result_view = "full"          # full | preview (progressive-disclosure stand-in)
+preview_chars = 400
+show_metadata = false

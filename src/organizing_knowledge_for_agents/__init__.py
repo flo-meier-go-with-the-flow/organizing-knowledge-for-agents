@@ -1,2 +1,1 @@
-def main() -> None:
-    print("Hello from organizing-knowledge-for-agents!")
+"""Agentic retrieval experiments on the Confluence slice of EnterpriseRAG-Bench."""

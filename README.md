@@ -1,93 +1,103 @@
 # organizing-knowledge-for-agents
 
+Experiments on how data structure (metadata, progressive disclosure, folder layout) affects agentic retrieval, using the Confluence slice of [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench).
 
+The baseline is an agent built on the OpenAI Responses API. Its search tool does hybrid retrieval: Voyage embeddings in Chroma plus in-memory BM25, fused with reciprocal rank fusion. Every grid cell runs the same agent loop; conditions differ only in config toggles for the tools and the indexed text.
 
-## Getting started
+## Setup
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
-```
-cd existing_repo
-git remote add origin https://codehub.zuehlke.com/ai-engineering/organizing-knowledge-for-agents.git
-git branch -M main
-git push -uf origin main
+```bash
+uv sync
+cp .env.example .env   # fill in OPENAI_API_KEY, VOYAGE_API_KEY (and OPENAI_BASE_URL for a company endpoint)
 ```
 
-## Integrate with your tools
+The Confluence corpus is committed under `data/confluence/`. The questions and the evaluator come from an EnterpriseRAG-Bench checkout, expected at `../EnterpriseRAG-Bench`. Set `ERB_ROOT` if it lives elsewhere:
 
-* [Set up project integrations](https://codehub.zuehlke.com/ai-engineering/organizing-knowledge-for-agents/-/settings/integrations)
+```bash
+git clone https://github.com/onyx-dot-app/EnterpriseRAG-Bench.git ../EnterpriseRAG-Bench
+```
 
-## Collaborate with your team
+## 1. Build the index (once per text variant)
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+```bash
+uv run python -m organizing_knowledge_for_agents.index            # voyage-4-large, variant m0 (title + content)
+```
 
-## Test and Deploy
+This embeds 5,189 docs (about 13M tokens) into `data/chroma/`. If it's interrupted, re-running the same command resumes.
 
-Use the built-in continuous integration in GitLab.
+## 2. Run the agent
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+```bash
+# pilot first: measure cost per question before committing to the grid
+uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.toml --questions confluence --limit 10
 
-***
+uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.toml --questions confluence --repeat 0
+uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.toml --questions not_found  --repeat 0
+uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.toml --questions metadata   --repeat 0
+```
 
-# Editing this README
+| Question set | Source | Count | Evaluate with |
+|---|---|---|---|
+| `confluence` | `questions.jsonl`, `source_types == ["confluence"]` | 64 | `questions.jsonl` |
+| `not_found` | `questions.jsonl`, `info_not_found` (abstention control) | 20 | `questions.jsonl` |
+| `metadata` | `extra_questions.jsonl`, Confluence only | 12 | `extra_questions.jsonl` (IDs overlap with the main file) |
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+Output goes to `runs/<config>/<model>/<question set>/r<repeat>/`:
 
-## Suggestions for a good README
+- `answers.jsonl`: the evaluator's input format.
+- `metrics.jsonl`: tokens, cached tokens, tool calls, docs seen and latency per question.
+- `summary.json`: aggregates over the run.
+- `traces/`: full agent transcripts, minus encrypted reasoning.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+Runs resume, and questions that errored are retried on the next invocation. Agent runs are nondeterministic, so repeat each cell (`--repeat 1`, `--repeat 2`, ...). `runs/` is gitignored because it contains benchmark questions and answers.
 
-## Name
-Choose a self-explaining name for your project.
+## 3. Evaluate
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+The evaluator lives in the bench repo and needs its dependencies. Pin one judge model for the whole study. Don't use the small agent model as the judge.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+```bash
+cd ../EnterpriseRAG-Bench
+RUN=../organizing-knowledge-for-agents/runs/baseline/gpt-5-mini/confluence/r0
+LLM_PROVIDER=openai LLM_API_KEY=$OPENAI_API_KEY LLM_MODEL_NAME=<judge model> \
+uv run --no-project --with-requirements requirements.txt \
+  python -m src.scripts.answer_evaluation.metrics_based_eval \
+    --answers-file $RUN/answers.jsonl \
+    --questions-file questions.jsonl \
+    --results-file $RUN/results.json \
+    --updated-questions-file $RUN/questions_updated.jsonl \
+    --no-correction --parallelism 8
+```
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+`--no-correction` keeps the gold set fixed. Without it, the evaluator can rewrite gold docs and answer facts based on what each run retrieved, so different cells would be scored against different ground truths. For a company endpoint, also export `OPENAI_BASE_URL`; the bench's OpenAI client picks it up.
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+## Layout
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+```
+src/organizing_knowledge_for_agents/
+  settings.py   paths, env, experiment config (TOML -> dataclasses)
+  corpus.py     load + clean docs (whitelisted metadata only), text variants
+  questions.py  question sets
+  index.py      Voyage -> Chroma indexing (resumable)
+  search.py     hybrid search (dense + BM25, RRF)
+  tools.py      agent tools and their rendering; grid toggles live here
+  agent.py      Responses API loop with tool budget and forced finish
+  run.py        runner: parallel, resumable, writes answers/metrics/traces
+configs/        one TOML per grid cell
+data/confluence the corpus (raw EnterpriseRAG-Bench JSON)
+tests/          loop tests (fake client) + corpus checks (no API keys needed)
+```
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## Adding a grid condition
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+1. Copy `configs/baseline.toml` and give it a unique `name`.
+2. Change one dimension:
+   - **Progressive disclosure:** `tools.result_view = "preview"`. Search then returns previews, and the agent must call `read_document`.
+   - **Metadata visible:** `tools.show_metadata = true`.
+   - **New indexed text** (e.g. metadata in the embedding): add a variant in `corpus.render_text`, index it with `--variant`, and set `retrieval.text_variant`.
+   - **New tools** (folder navigation, metadata filters, outlines): add them in `tools.py` behind a `ToolsConfig` flag.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+The raw JSON in `data/confluence/` contains generator artifacts. `original_location` is the pre-noise folder of a misfiled doc, and `dataset_noise_document` marks noise docs. `corpus.load_docs` keeps only whitelisted metadata fields, so neither reaches the agent. Keep it that way, unless a condition deliberately uses `original_location` as an oracle.
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```bash
+uv run pytest            # no API keys needed; corpus/question checks need the data and the bench checkout
+```
