@@ -1,0 +1,46 @@
+{
+  "title": "SDK Chaos & Recovery Workshop",
+  "space": "eng-developer-experience",
+  "author": "Maya Chen",
+  "owner_team": "engineering",
+  "status": "published",
+  "created_at": "2025-10-06",
+  "last_updated": "2025-12-11",
+  "reviewers": [
+    "Luis Gomez",
+    "Priya Rao"
+  ],
+  "labels": [
+    "sdk",
+    "resilience",
+    "telemetry",
+    "chaos-testing",
+    "workshop"
+  ],
+  "related_pages": [
+    "/confluence/eng-developer-experience/api-examples/sdk-telemetry-cookbook-2025",
+    "/confluence/eng-serving-runtime/profiling-playbook/runtime-streaming-troubleshooting-2025"
+  ],
+  "confidentiality": "internal",
+  "body": "Summary:\nThis workshop walks developers through deliberately breaking SDK integrations, watching the resulting telemetry \"golden traces\", and checking recovery strategies against Redwood inference endpoints. It is designed so SDK authors, platform engineers and support oncall can run it end to end in about 90 minutes to confirm resilience behaviour and the standard fixes.\n\nGoals:\n- Reproduce deterministic faults in SDK -> runtime interactions (timeouts, partial responses, truncated streams).\n- Confirm observability for every failure mode: traces, spans, logs and token-level cost telemetry.\n- Exercise client-side fallbacks (jittered retry, stream resume, local cache) and server-side degradation (model variant fallback, rate-aware routing).\n- Leave behind artifacts: golden-trace examples, regression tests and a support triage checklist.\n\nPrerequisites:\n1) A developer machine with Python 3.9+ and Node.js 16+.\n2) A Redwood dev tenant API key with dev-level quota.\n3) The harness repo: git@github.com:redwood-inference/sdk-chaos-lab.git (or the scaffold below).\n4) Docker (for the local fault-injection proxy) and curl.\n\nQuickstart scaffold:\n1. git clone git@github.com:redwood-inference/sdk-chaos-lab.git && cd sdk-chaos-lab\n2. cp .env.example .env and set REDWOOD_API_KEY / REDWOOD_BASE_URL\n3. make deps  # node_modules + pip env\n4. ./scripts/start-proxy.sh  # fault-injection proxy on localhost:8080\n\nWorkshop exercises (90 minutes):\n1) Golden-trace capture (15-20m)\n   - Record a baseline successful embed -> retrieve -> generate call.\n   - Run scripts/capture_trace.py --scenario baseline --output traces/golden_baseline.json\n   - Expect spans for http.request, sdk.deserialize and runtime.kv_cache_hit metrics.\n\n2) Timeout and retry (20m)\n   - Fault: the proxy delays the first POST to /v1/generate by 1200ms.\n   - Expected client behaviour: the default 1s client timeout fires, retry with exponential backoff kicks in, and tokens are not billed twice.\n   - Command: ./scripts/inject_fault.sh --type delay --path /v1/generate --ms 1200 --once\n   - Validate with examples/python/stream_resume_test.py: exactly one retry logged, one success, token_cost identical to baseline.\n\n3) Truncated stream and resume (20m)\n   - Fault: the proxy cuts the server-sent event stream mid-response.\n   - The SDK should expose a resumable id/token and resume without duplicating output to the user.\n   - Example (Node):\n     const r = await Redwood.generateStreaming({ prompt, resume: true });\n     // on 'truncated' event call r.resume()\n\n4) Partial model fallback (15m)\n   - Fault: simulated out-of-capacity on m-latest returning 503 on cold start.\n   - Expected platform reaction: automatic fallback to m-latest-quantized variant or regional replica within 500ms.\n   - Validate that latency stays below 800ms and quality regression on the golden prompt set is < 2%: scripts/quality_check.sh --baseline traces/golden_baseline.json --target traces/fallback_run.json\n\n5) Telemetry and cost guardrails (10m)\n   - Traces must carry token_count, model_variant, quantization_profile, route_key and billing_unit.\n   - A synthetic sdk.request.latency.p50 gauge above 1s should raise an alert in the sandbox paging channel.\n\nSDK patterns and code snippets\n- Python retry wrapper for idempotent generation:\n\n  import time\n  import requests\n\n  def call_with_retries(payload, max_attempts=3):\n      backoff = 0.2\n      for _ in range(max_attempts):\n          try:\n              resp = requests.post(\n                  \"http://localhost:8080/v1/generate\", json=payload, timeout=1.0\n              )\n              resp.raise_for_status()\n              return resp.json()\n          except requests.exceptions.Timeout:\n              time.sleep(backoff)\n              backoff *= 2\n      raise RuntimeError(\"exhausted retries\")\n\n- Node streaming-resume pattern:\n\n  const { RedwoodClient } = require('@redwood/sdk');\n  const client = new RedwoodClient({ baseURL: process.env.REDWOOD_BASE_URL });\n\n  async function streamingExample() {\n    const stream = await client.generateStream({ model: 'm-latest', prompt: 'Hello' });\n    stream.on('error', async (err) => {\n      if (err.code === 'TRUNCATED') {\n        await stream.resume(); // SDK dedupes the token prefix\n      } else {\n        throw err;\n      }\n    });\n  }\n\nGolden trace format:\n- A golden trace is a JSON file containing a top-level array of spans. Every span has these string fields:\n  - trace_id\n  - span_id\n  - parent_id (empty string if none)\n  - name (e.g. http.request, sdk.serialize, runtime.infer)\n  - start_ts (ISO 8601)\n  - end_ts (ISO 8601)\n  - attributes (flattened comma-separated key=value list with model_variant, token_count, route_key, billing_unit)\n\nExample attributes: \"model_variant=m-latest,token_count=42,route_key=us-east-1,billing_unit=gen_token\"\n\nSupport triage checklist:\n1) Reproduce with the harness using the customer's API key region.\n2) Attach both the golden trace and the failing trace.\n3) Look for double-billing: token_cost jumps right after retries.\n4) Truncated stream: check for a runtime.stream.resume span carrying the resume id.\n5) Fallback: compare model_variant between baseline and failing trace.\n6) File a regression ticket with failing_trace.json, the command run, SDK version and proxy logs.\n\nConfig matrix (CSV):\n\"scenario,proxy_fault,client_timeout_ms,expected_behavior,primary_validation\"\n\"baseline,none,1500,success,golden_trace match\"\n\"delay-first-post,delay(1200ms),1000,retry-with-backoff,no double-billing\"\n\"truncate-stream,truncate-after-3-chunks,2000,resume-able stream,resume span present\"\n\"model-oom,503-on-cold-start,800,auto-fallback,latency<800ms\"\n\nOwnership:\n- Workshop owner: eng-developer-experience (primary: Maya Chen).\n- If the workshop reproduces a production bug, open a PagerDuty incident tagged \"runtime-serving\" and \"sdk\".\n- Store golden traces in s3://redwood-dev-golden-traces/sdk-chaos-lab/ with role-based ACLs.\n\nHow teams should use this workshop:\n- SDK authors: add one golden-trace capture to CI for each major release as a post-merge job, and block the release on a >10% regression vs the golden baseline.\n- Platform: run the full workshop in the staging cluster before shipping model-serving kernel or routing changes.\n- Support: follow the triage checklist for customer reports of truncated streams or unexpected token billing.\n\nArtifacts to produce:\n- traces/golden_baseline.json\n- traces/failure_mode_<name>.json\n- coverage/regression_<sdk-version>.md\n- Pre-filled support ticket templates from the harness run\n\nReferences:\n- eng-developer-experience/api-examples/sdk-telemetry-cookbook-2025\n- eng-serving-runtime/profiling-playbook/runtime-streaming-troubleshooting-2025\n- security-and-compliance/incident-response-security/streaming-data-retention-policy\n\nAppendix: standard fixes\n- Attach idempotency tokens to generation requests; the server dedupes within 10s window.\n- Expose resume IDs for streaming RPCs and keep a short-lived local buffer for dedupe.\n- Snapshot token cost before and after retries in telemetry to catch billing anomalies.\n- For frequent fallbacks, add a cold-start pre-warm task for high-SLA tenants or enable burst capacity on the dedicated pool.\n\nContact:\n- Maya Chen (owner, eng-developer-experience) - maya@redwood.ai\n- Support escalation alias: support-oncall@redwood.ai\n",
+  "original_location": "confluence/eng-developer-experience/quickstarts-and-templates/sdk-chaos-and-recovery-workshop-2025.json",
+  "title_field_name": "title",
+  "content_field_names": [
+    "body"
+  ],
+  "dataset_doc_uuid": "dsid_cb8f425e972d4661b5786d00d62ab7df",
+  "data_classification": "internal",
+  "lifecycle_status": "archived",
+  "doc_classification": "procedure",
+  "volatility": "changing",
+  "document_type": "runbook",
+  "audience_groups": [
+    "sdk_developers",
+    "engineering",
+    "sre_oncall"
+  ],
+  "product_area": [
+    "sdk",
+    "inference_runtime"
+  ]
+}

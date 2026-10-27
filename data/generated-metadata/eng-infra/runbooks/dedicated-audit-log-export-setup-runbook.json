@@ -1,0 +1,40 @@
+{
+  "title": "Runbook: customer-managed audit log export setup (Dedicated)",
+  "space": "eng-infra",
+  "author": "Connor OBrien",
+  "owner_team": "engineering",
+  "status": "published",
+  "created_at": "2024-10-14",
+  "last_updated": "2025-01-22",
+  "reviewers": [
+    "Evelyn Hart",
+    "David Kim"
+  ],
+  "labels": [
+    "runbook",
+    "dedicated",
+    "audit-logging",
+    "iam",
+    "terraform"
+  ],
+  "confidentiality": "internal",
+  "content": "# Summary\nUse this runbook to turn on **customer-managed audit log export** for a **Dedicated** customer (single-tenant control plane plus dedicated data plane).\n\nUnlike Hosted, Dedicated can get region-specific connector capacity, and some customers have the connector runtime isolated inside their dedicated account/VPC boundary.\n\n# Preconditions\n- An internal-support Jira ticket containing:\n  - customer company and `dedicated_cluster_id`\n  - destination sink (S3/GCS/Azure) and region\n  - requested prefixes and retention intent\n  - Security approval comment, plus Legal approval note where required\n- The customer has created the destination bucket/container and shared identity configuration.\n\n# Decision: connector placement\nPick one and record it in the Jira ticket:\n- **Redwood-managed connector** (default): runs in Redwood core infra and assumes the customer role to write.\n- **Dedicated-placed connector** (exception): runs inside the dedicated environment for customers needing tighter network boundaries. Extra deployment steps and SRE review apply.\n\n# Procedure (default: Redwood-managed connector)\n## 1) Validate IAM/workload identity\n- AWS: role trust policy must allow the Redwood export connector principal to assume the role.\n- GCP: workload identity binding from the Redwood service account to the customer bucket writer role.\n- Azure: federated credential mapping (managed identity) or app registration permissions per the approved template.\n\nSecurity has already approved, but Eng Infra should still sanity-check for over-permissioning.\n\n## 2) Apply dedicated tenant export config\nPer-customer export config lives in the `dedicated-config` Terraform module.\n\n1. Set the tenant's `audit_export` values:\n- `enabled=true`\n- `sink=s3|gcs|azure`\n- `region=<REGION>`\n- `destination=<bucket/container>`\n- `prefix=<PREFIX>`\n- `auth_reference=<role-arn|binding|federated-cred-id>`\n\n2. Plan and apply:\n```bash\ncd infra/dedicated/<CUSTOMER_SLUG>\nterraform plan\nterraform apply\n```\n\n## 3) Validate connector metrics\n- Dashboard: `Dedicated / <CUSTOMER> / Audit Export`\n- Check that:\n  - `delivery_success_rate` > 0.95 after warmup\n  - `delivery_lag_seconds` is decreasing\n  - there are no sustained 4xx write errors\n\n## 4) Validate destination objects\nHave CS confirm with the customer. Expected object path:\n- `dedicated_cluster=<ID>/region=<REGION>/dt=YYYY-MM-DD/hr=HH/*.jsonl.gz`\n\n# Procedure (exception: dedicated-placed connector)\nOnly when the customer needs all egress to stay inside their VPC boundary.\n\n1. Install `audit-export-connector` into the dedicated Kubernetes cluster with Helm.\n2. Route outbound traffic to the destination over private endpoints if required.\n3. Use short-lived identity for the connector (IRSA / workload identity).\n4. Smoke test: trigger an admin action event and confirm delivery within 30 minutes.\n\nThis mode needs SRE review because of paging implications.\n\n# Rollback\n- Set `audit_export.enabled=false` in Terraform and apply.\n- For a dedicated-placed connector, uninstall the Helm release and confirm metrics stop.\n\n# Troubleshooting notes\n- 403s usually mean bucket policy or role trust drift.\n- High delivery lag usually points to destination throttling or an under-provisioned connector.\n- Azure: container permissions are often mis-scoped; confirm the exact container name. SAS tokens are permitted only if scoped to the single container with write-only permission.\n\n# Related pages\n- Security controls and approval gates\n- Audit log export architecture\n- Support intake SOP\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "content"
+  ],
+  "dataset_doc_uuid": "dsid_9ca4f791be9a4cf8ab231a0ea1fdfc4b",
+  "data_classification": "internal",
+  "lifecycle_status": "archived",
+  "doc_classification": "procedure",
+  "volatility": "changing",
+  "document_type": "runbook",
+  "audience_groups": [
+    "engineering",
+    "sre_oncall"
+  ],
+  "product_area": [
+    "observability",
+    "private_deployment"
+  ]
+}

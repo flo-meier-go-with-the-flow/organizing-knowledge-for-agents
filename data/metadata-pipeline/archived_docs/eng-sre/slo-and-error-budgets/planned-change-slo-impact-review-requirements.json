@@ -1,0 +1,30 @@
+{
+  "title": "Planned Change: SLO Impact Review Requirements",
+  "space": "eng-sre",
+  "author": "Grace O'Connor",
+  "owner_team": "engineering",
+  "status": "archived",
+  "created_at": "2023-03-06",
+  "last_updated": "2023-08-21",
+  "reviewers": [
+    "Connor O'Brien",
+    "Ava Chen"
+  ],
+  "labels": [
+    "sre",
+    "slo",
+    "error-budget",
+    "planned-changes"
+  ],
+  "confidentiality": "internal",
+  "related_pages": [
+    "confluence://policies-and-process/change-management/production-change-management-policy",
+    "confluence://oncall-and-incident-response/incident-process/incident-severity-and-escalation"
+  ],
+  "content": "## Purpose\nThese are the minimum SRE review steps for planned changes that could affect availability, latency or throughput SLOs in any production environment (Hosted, Dedicated, Private).\n\n## When SRE review applies\nA review is required for every change classified High/Critical risk under the Production Change Management Policy, and for any change that:\n- Needs alerts to be disabled\n- Needs a maintenance window\n- Could plausibly cause elevated 5xx, latency regressions or a capacity shortfall\n\n## Required checks (link evidence in the change record)\n### 1) SLO state\n- Check the 28-day error budget remaining for the affected services/tenants.\n- If less than 40% of the error budget remains, attach a written risk acceptance from the SRE manager.\n\n### 2) Capacity and saturation\n- Confirm GPU and request headroom for the planned window.\n- Check for overlapping capacity events (region maintenance, fleet migrations, shortages).\n\n### 3) Monitoring\n- List the watch-list metrics for the window: 5xx rate, P95 latency, queue depth/saturation, restarts/OOM and synthetic checks at a minimum.\n- Verify alerts are on and routed to an active on-call.\n\n### 4) Rollback\n- Show that rollback fits within the customer (or platform) time-to-restore target.\n- Name the rollback decision point (for example after control-plane, or after data-plane).\n\n### 5) Overlapping changes\n- Make sure no other high-risk change targets the same customer or region.\n- If one does, document the mitigation or move the window.\n\n## SRE Go/No-Go\nSRE recommends GO only when:\n- The error budget is healthy, or a risk acceptance is on file\n- Monitoring is in place and on-call coverage is confirmed\n- The rollback plan is specific and achievable\n- Customer communications are prepared for customer-visible changes\n\n## Evidence checklist (paste into the change record)\n- [ ] Error budget link/screenshot\n- [ ] Capacity headroom note (GPU + queue)\n- [ ] Alert routing confirmed\n- [ ] Rollback time estimate and decision point\n- [ ] Impacted services/routes\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "content"
+  ],
+  "dataset_doc_uuid": "dsid_673bf6ca52c84e98a9945e68888cfa5e"
+}

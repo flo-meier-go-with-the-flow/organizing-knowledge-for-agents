@@ -1,0 +1,42 @@
+{
+  "title": "Third-Party Integration Readiness and Compatibility Guidelines for Private Deployments (2025)",
+  "space": "eng-private-deployments",
+  "author": "Leah Rivera",
+  "owner_team": "engineering",
+  "status": "published",
+  "created_at": "2024-11-04",
+  "last_updated": "2025-04-21",
+  "reviewers": [
+    "Omar Castillo"
+  ],
+  "labels": [
+    "private-deploy",
+    "integration",
+    "compatibility",
+    "connectors"
+  ],
+  "related_pages": [
+    "/confluence/eng-private-deployments/customer-requirements-library/private-deploy-integration-and-telemetry-contract-2025",
+    "/confluence/eng-private-deployments/deployment-guides/private-delivery-and-day2-operational-contracts-2025"
+  ],
+  "confidentiality": "internal",
+  "content": "> **Archived 2025-06-12:** this page is superseded by \"Third-Party Integration Readiness and Compatibility Guidelines for Private Deployments\" and is kept for reference only.\n\nSummary:\nThese guidelines describe readiness requirements and compatibility constraints for third-party systems (connectors, proxies, IAM, observability vendors, storage backends) used with Redwood Private deployments, both VPC and on-prem. They cover the integration order, technical minimums, acceptance tests and rollback hooks that reduce field failures during install and Day-2 operations.\n\nScope and audience:\n- Scope: connectors and external systems integrated with the Redwood Private control plane and runtime: identity providers, KMS/HSMs, object stores, proxies/load balancers, SIEM/observability vendors and cloud-native services.\n- Audience: field engineers, SREs, customer platform engineers, solutions architects and professional services.\n\nPrinciples:\n1) Order matters: identity and network connectivity first, data plane last.\n2) Safe defaults: connectors need a non-destructive mode for first validation.\n3) Observability before production traffic.\n4) Every integration has a documented backout plan.\n\nPrerequisites:\n- Network: TLS egress (443 or the vendor's port list) to vendor endpoints; vendor hostnames resolvable from control-plane nodes; consistent MTU across the data plane (1500 recommended).\n- Identity: reachable IdP SAML/OIDC endpoints with signed metadata; least-privilege service accounts for cloud connectors.\n- Compute and storage: object buckets with versioning and lifecycle policies; local log buffers meeting IOPS/latency targets.\n\nCompatibility matrix:\n| External System | Minimum Required Version | Auth Modes Supported | Notes/Constraints |\n|------------------|--------------------------|----------------------|-------------------|\n| SAML IdPs (Okta, Azure AD) | Generic SAML 2.0 metadata | Signed SAML assertions, OIDC | Provide SP metadata; test with a 10-user test group |\n| Vault (HashiCorp) | 1.6+ | Token, AppRole, mTLS | K/V v2 required for rotation hooks; TLS1.2+ ciphers |\n| KMS (Cloud HSM & KMIP) | Vendor-specific (see annex) | HSM PKCS#11, KMIP v1.4+ | Ensure latency < 100ms typical; async signing fallback supported |\n| S3-compatible storage (MinIO, S3) | AWS S3 API 2006-03-01 compatible | AccessKey/Secret or IAM role | Object versioning required for state snapshots |\n| Observability (OTLP/Splunk/Datadog) | OTLP receiver or vendor API v1+ | mTLS or API key | Traces and metrics endpoint needed before full sampling |\n\nValidation-mode connector manifest (illustrative):\n  {\n    \"connector_name\": \"acme-vault-primary\",\n    \"mode\": \"validation\",\n    \"auth\": { \"type\": \"approle\", \"role_id\": \"<redacted>\" },\n    \"validation_tests\": [\"list-secrets\", \"read-kv-v2\"],\n    \"timeout_seconds\": 30\n  }\n\nIntegration sequence:\n1) Provision credentials (service account or AppRole), store them in customer escrow and verify auth offline without changing remote state.\n2) Attach IdP metadata, validate SSO with a 10-user test group, and check RBAC mappings with a least-privilege user.\n3) Connect OTLP telemetry and logging in validation mode at 0.1% sampling; logs must carry structured IDs for ticket correlation.\n4) Write a versioned snapshot test object and verify retrieval and checksum.\n5) Mirror a representative subset of requests with 0% live traffic for 24\u201372 hours, watching errors, tokenization failures and latency.\n6) Ramp to 10\u201325% for 24h, 50% for 72h, then full based on risk tolerance.\n\nFirewall rules:\n- IdPs: outbound HTTPS; STS callbacks on 443.\n- Vault/KMS: TCP 8200 (Vault default) or vendor ports; mTLS where configured.\n- Object storage: HTTPS plus S3 signed URL callbacks.\n- Observability: HTTPS egress, static IP ranges where published.\n\nPre-acceptance observability:\n- Traces: median OTLP span export latency < 200ms.\n- Metrics: metric export success rate >= 99.0% over 1h window.\n- Logs: 95th percentile ingestion within 5 minutes.\n- Connectors expose /health and /ready returning 200 within 200ms.\n\nAcceptance tests:\n- Smoke (before production): auth token exchange with TTL and renewal; CRUD on a test object with eventual consistency; snapshot and restore into a clean namespace; telemetry visible in backends.\n- Regression (major upgrades): 2x peak load for 5 minutes without crashes; injected transient vendor 5xx handled gracefully.\n\nUpgrades and rollback:\n- Connectors send an API version header; receivers tolerate unknown optional fields.\n- Run new connector versions on the canary control plane with traffic shadow for at least 24h.\n- Rollback: disable the connector in control-plane config; restore escrowed credentials if keys rotated; restore the last good snapshot and verify checksums; rerun smoke tests and compare telemetry.\n\nOn-call checklist:\n1) Check connector /health and control plane logs by tracer ID.\n2) Switch the connector to validation mode or stop outbound flow.\n3) Notify the owner team and affected customers with an ETA.\n4) Roll back or escalate to vendor support.\n5) Write the RCA and turn gaps into acceptance criteria.\n\nCustomer sign-off criteria:\n- All smoke tests green for 24 hours under representative load.\n- No data loss during mirroring.\n- Telemetry baselines within 5% of the reference environment.\n- Backout plan validated in a dry-run.\n\nAppendix A \u2014 Vendor annex example (ThirdParty KMS Co.): min version 3.2.1; at most 500 concurrent signing requests, so queue asynchronously, batch signing and use a local key TTL cache.\n\nAppendix B \u2014 Test commands:\n- Vault AppRole: curl -sS --request POST https://vault.example/api/v1/auth/approle/login -d '{\"role_id\":\"<role>\",\"secret_id\":\"<secret>\"}'\n- OTLP ping: echo '{\"traceId\":\"0001\",\"spanId\":\"0002\"}' | nc -w 2 otlp.vendor.example 4317\n\nOwnership:\n- Owner: eng-private-deployments (field-ops subteam).\n- Matrix or test changes need peer review plus sign-off from one SRE and one Solutions Architect.\n- Reviewed annually or on major vendor changes.\n\nContact: leah.rivera@redwood.ai; escalation field-ops -> eng-private-deployments -> vendor POC.\n\nNote: this 2025 edition is no longer maintained.\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "content"
+  ],
+  "dataset_doc_uuid": "dsid_04033cd7c02046bf82877a973bdaf140",
+  "data_classification": "internal",
+  "lifecycle_status": "archived",
+  "doc_classification": "procedure",
+  "volatility": "changing",
+  "document_type": "runbook",
+  "audience_groups": [
+    "engineering",
+    "sre_oncall",
+    "customers_external"
+  ],
+  "product_area": [
+    "private_deployment"
+  ]
+}
