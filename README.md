@@ -4,7 +4,7 @@ Experiments on how data structure (metadata, progressive disclosure, folder layo
 
 The baseline is an agent built on the OpenAI Responses API. Its search tool does hybrid retrieval: OpenAI `text-embedding-3-large` vectors in Chroma plus in-memory BM25, fused with reciprocal rank fusion. Every grid cell runs the same agent loop; conditions differ only in config toggles for the tools and the indexed text.
 
-Goals, experiment grid, decision log and current status: [docs/project-plan.md](docs/project-plan.md).
+Goals, experiment grid, decision log and current status: [docs/embed-and-basic-agent-loop.md](docs/embed-and-basic-agent-loop.md).
 
 ## Setup
 
