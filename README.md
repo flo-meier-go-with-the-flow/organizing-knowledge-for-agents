@@ -6,6 +6,29 @@ The baseline is an agent built on the OpenAI Responses API. Its search tool does
 
 Goals, experiment grid, decision log and current status: [docs/embed-and-basic-agent-loop.md](docs/embed-and-basic-agent-loop.md).
 
+## Baseline results
+
+First baseline, 27 October 2026: `configs/baseline.toml` with `GPT-6-luna` (medium reasoning) on the `confluence` question set, one run (`r0`).
+
+| Question type | Questions | Correct | Completeness | Combined | Doc recall | Non-gold docs cited | Tool calls | Input tokens |
+|---|--:|--:|--:|--:|--:|--:|--:|--:|
+| **All** | **64** | **71.9%** | **79.6%** | **65.6** | **82.8%** | **0.58** | **3.5** | **99k** |
+| Basic | 19 | 89.5% | 89.6% | 84.3 | 94.7% | 0.26 | 2.1 | 36k |
+| Constrained | 11 | 90.9% | 92.8% | 87.7 | 95.5% | 0.45 | 2.8 | 43k |
+| Semantic | 15 | 60.0% | 64.6% | 51.3 | 66.7% | 0.67 | 4.6 | 203k |
+| Completeness | 11 | 36.4% | 74.6% | 30.9 | 75.2% | 1.18 | 6.5 | 173k |
+| Other | 8 | 75.0% | 72.4% | 65.2 | 78.1% | 0.50 | 1.8 | 25k |
+
+- Values are means per question. The metrics are defined in [3. Evaluate](#3-evaluate). Combined is the bench's headline score: completeness, counted only for answers judged correct.
+- Other groups the small types: miscellaneous (3), intra-document reasoning (2), project-related (2) and conflicting info (1).
+- Single-page lookups (basic, constrained) are close to solved. Completeness questions need 6.2 gold pages on average, against 2.1 overall, and only 36% of them are answered correctly.
+- Of the 18 wrong answers, 6 never saw a gold page in any tool result, and 9 saw every gold page but were still judged wrong.
+
+These numbers are provisional:
+- **The judge was `GPT-6-luna`, the agent model itself**, which likely flatters the scores. Rescore with a stronger judge once one is deployed.
+- **One run only.** Agent runs are nondeterministic, so differences of a few points between conditions need repeats.
+- **The `not_found` and `metadata` sets haven't been run yet.**
+
 ## How the agent works
 
 A deliberately minimal harness: one model, three tools, a fixed tool budget.
@@ -92,7 +115,7 @@ Runs resume, and questions that errored are retried on the next invocation. Agen
 ## 3. Evaluate
 
 ```bash
-uv run python -m organizing_knowledge_for_agents.evaluate --run-dir runs/baseline/gpt-5-mini/confluence/r0
+uv run python -m organizing_knowledge_for_agents.evaluate --run-dir runs/baseline/GPT-6-luna/confluence/r0
 ```
 
 The judge model comes from `JUDGE_MODEL` in `.env`, or from `--judge-model`. Pin one judge for the whole study, and don't use the small agent model as the judge. The evaluator refuses to mix judges within a run directory. It uses the same OpenAI endpoint as the agent.
