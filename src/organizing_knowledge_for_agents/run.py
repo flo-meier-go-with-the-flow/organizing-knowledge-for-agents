@@ -27,23 +27,17 @@ from openai import OpenAI
 from tqdm import tqdm
 
 from organizing_knowledge_for_agents.agent import run_agent
+from organizing_knowledge_for_agents.jsonl import read_jsonl
 from organizing_knowledge_for_agents.questions import QUESTION_SETS, load_question_set
 from organizing_knowledge_for_agents.search import Searcher
 from organizing_knowledge_for_agents.settings import RUNS_DIR, ExperimentConfig, load_config
 from organizing_knowledge_for_agents.tools import ToolBox
 
 
-def _read_jsonl(path: Path) -> list[dict]:
-    if not path.exists():
-        return []
-    with open(path, encoding="utf-8") as f:
-        return [json.loads(line) for line in f if line.strip()]
-
-
 def summarize(run_dir: Path, n_questions: int) -> dict:
     # Keep the last row per question: a crash between writes can leave a duplicate.
-    metrics = list({m["question_id"]: m for m in _read_jsonl(run_dir / "metrics.jsonl")}.values())
-    errors = _read_jsonl(run_dir / "errors.jsonl")
+    metrics = list({m["question_id"]: m for m in read_jsonl(run_dir / "metrics.jsonl")}.values())
+    errors = read_jsonl(run_dir / "errors.jsonl")
     done = {m["question_id"] for m in metrics}
     summary: dict = {
         "questions": n_questions,
@@ -63,7 +57,7 @@ def summarize(run_dir: Path, n_questions: int) -> dict:
 
 
 def run(cfg: ExperimentConfig, question_set: str, repeat: int, parallelism: int, limit: int | None, question_id: str | None) -> Path:
-    qs, questions = load_question_set(question_set)
+    questions = load_question_set(question_set)
     if question_id:
         questions = [q for q in questions if q["question_id"] == question_id]
     if limit:
@@ -72,10 +66,10 @@ def run(cfg: ExperimentConfig, question_set: str, repeat: int, parallelism: int,
     run_dir = RUNS_DIR / cfg.name / cfg.agent.model / question_set / f"r{repeat}"
     (run_dir / "traces").mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(
-        json.dumps({**cfg.to_dict(), "question_set": question_set, "questions_file": str(qs.questions_file)}, indent=2)
+        json.dumps({**cfg.to_dict(), "question_set": question_set}, indent=2)
     )
 
-    done = {row["question_id"] for row in _read_jsonl(run_dir / "answers.jsonl")}
+    done = {row["question_id"] for row in read_jsonl(run_dir / "answers.jsonl")}
     todo = [q for q in questions if q["question_id"] not in done]
     print(f"{cfg.name} / {cfg.agent.model} / {question_set} / r{repeat}: {len(questions)} questions, {len(done)} done, {len(todo)} to run")
 

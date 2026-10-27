@@ -40,14 +40,15 @@ Requires [uv](https://docs.astral.sh/uv/), which also installs the pinned Python
 
 ```bash
 uv sync
-cp .env.example .env   # fill in OPENAI_API_KEY (and OPENAI_BASE_URL for a company endpoint)
+cp .env.example .env   # fill in OPENAI_API_KEY, JUDGE_MODEL (and OPENAI_BASE_URL for a company endpoint)
 ```
 
-The Confluence corpus is committed under `data/confluence/`. The questions and the evaluator come from an EnterpriseRAG-Bench checkout, expected at `../EnterpriseRAG-Bench`. Set `ERB_ROOT` if it lives elsewhere:
+Everything needed is in this repo:
+- the corpus in `data/confluence/`
+- the question sets with gold answers in `data/questions/`
+- the evaluator
 
-```bash
-git clone https://github.com/onyx-dot-app/EnterpriseRAG-Bench.git ../EnterpriseRAG-Bench
-```
+No EnterpriseRAG-Bench checkout is required. Both datasets come from [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench) (MIT); see [`data/questions/README.md`](data/questions/README.md) for provenance.
 
 ## 1. Build the index (once per text variant)
 
@@ -73,11 +74,11 @@ uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.t
 uv run python -m organizing_knowledge_for_agents.run --config configs/baseline.toml --questions metadata   --repeat 0
 ```
 
-| Question set | Source | Count | Evaluate with |
+| Question set | File | Count | What it tests |
 |---|---|---|---|
-| `confluence` | `questions.jsonl`, `source_types == ["confluence"]` | 64 | `questions.jsonl` |
-| `not_found` | `questions.jsonl`, `info_not_found` (abstention control) | 20 | `questions.jsonl` |
-| `metadata` | `extra_questions.jsonl`, Confluence only | 12 | `extra_questions.jsonl` (IDs overlap with the main file) |
+| `confluence` | `data/questions/confluence.jsonl` | 64 | Questions whose gold docs are all Confluence pages |
+| `not_found` | `data/questions/not_found.jsonl` | 20 | Unanswerable questions (abstention control) |
+| `metadata` | `data/questions/metadata.jsonl` | 12 | Questions that depend on page metadata (space, author, status, dates) |
 
 Output goes to `runs/<config>/<model>/<question set>/r<repeat>/`:
 
@@ -86,27 +87,26 @@ Output goes to `runs/<config>/<model>/<question set>/r<repeat>/`:
 - `summary.json`: aggregates over the run.
 - `traces/`: full agent transcripts, minus encrypted reasoning.
 
-Runs resume, and questions that errored are retried on the next invocation. Agent runs are nondeterministic, so repeat each cell (`--repeat 1`, `--repeat 2`, ...). `runs/` is gitignored because it contains benchmark questions and answers.
+Runs resume, and questions that errored are retried on the next invocation. Agent runs are nondeterministic, so repeat each cell (`--repeat 1`, `--repeat 2`, ...). `runs/` holds generated outputs and is gitignored.
 
 ## 3. Evaluate
 
-The evaluator lives in the bench repo and needs its dependencies. Pin one judge model for the whole study. Don't use the small agent model as the judge.
-
 ```bash
-set -a; source .env; set +a   # export OPENAI_API_KEY (and OPENAI_BASE_URL) for the evaluator
-cd ../EnterpriseRAG-Bench
-RUN=../organizing-knowledge-for-agents/runs/baseline/gpt-5-mini/confluence/r0
-LLM_PROVIDER=openai LLM_API_KEY=$OPENAI_API_KEY LLM_MODEL_NAME=<judge model> \
-uv run --no-project --with-requirements requirements.txt \
-  python -m src.scripts.answer_evaluation.metrics_based_eval \
-    --answers-file $RUN/answers.jsonl \
-    --questions-file questions.jsonl \
-    --results-file $RUN/results.json \
-    --updated-questions-file $RUN/questions_updated.jsonl \
-    --no-correction --parallelism 8
+uv run python -m organizing_knowledge_for_agents.evaluate --run-dir runs/baseline/gpt-5-mini/confluence/r0
 ```
 
-`--no-correction` keeps the gold set fixed. Without it, the evaluator can rewrite gold docs and answer facts based on what each run retrieved, so different cells would be scored against different ground truths. The evaluator doesn't read this repo's `.env`, which is why the first line exports it. That also passes on `OPENAI_BASE_URL`, so the judge runs against your company endpoint too. For the `metadata` set, use `--questions-file extra_questions.jsonl`.
+The judge model comes from `JUDGE_MODEL` in `.env`, or from `--judge-model`. Pin one judge for the whole study, and don't use the small agent model as the judge. The evaluator refuses to mix judges within a run directory. It uses the same OpenAI endpoint as the agent.
+
+Scoring reproduces EnterpriseRAG-Bench's `metrics_based_eval` with `--no-correction`. It uses the bench's judge prompts verbatim (`eval_prompts.py`) and the same rules:
+
+| Metric | How it's computed |
+|---|---|
+| `answer_correct` | An LLM judge decides whether the answer agrees with the gold answer, after citations are stripped. |
+| `completeness_pct` | Share of the gold `answer_facts` that the judge finds in the answer. |
+| `document_recall_pct` | Share of gold docs among the returned doc IDs. Only for questions with gold docs. |
+| `invalid_extra_docs` | Returned docs that aren't gold. |
+
+The gold set is never rewritten, so every cell is scored against the same ground truth. Results go to `eval.jsonl` (per question; re-running resumes) and `eval_summary.json` (overall and per question type) in the run directory.
 
 ## Layout
 
@@ -114,16 +114,22 @@ uv run --no-project --with-requirements requirements.txt \
 src/organizing_knowledge_for_agents/
   settings.py   paths, env, experiment config (TOML -> dataclasses)
   corpus.py     load + clean docs (whitelisted metadata only), text variants
-  questions.py  question sets
+  questions.py  question sets (data/questions/)
   embeddings.py OpenAI embeddings client (text-embedding-3-large)
   index.py      embeddings -> Chroma indexing (resumable)
   search.py     hybrid search (dense + BM25, RRF)
   tools.py      agent tools and their rendering; grid toggles live here
   agent.py      Responses API loop with tool budget and forced finish
   run.py        runner: parallel, resumable, writes answers/metrics/traces
+  evaluate.py   scores a run: correctness, completeness, doc recall (bench-compatible)
+  eval_prompts.py  the bench's judge prompts, verbatim
+  jsonl.py      JSONL helper
+  import_questions.py  regenerates data/questions/ from a bench checkout (rarely needed)
 configs/        one TOML per grid cell
 data/confluence the corpus (raw EnterpriseRAG-Bench JSON)
-tests/          loop tests (fake client) + corpus checks (no API keys needed)
+data/questions  question sets with gold answers
+licenses/       EnterpriseRAG-Bench MIT license (data and judge prompts)
+tests/          agent loop, evaluator, embeddings and corpus tests (no API keys needed)
 ```
 
 ## Adding a grid condition
@@ -138,5 +144,5 @@ tests/          loop tests (fake client) + corpus checks (no API keys needed)
 The raw JSON in `data/confluence/` contains generator artifacts. `original_location` is the pre-noise folder of a misfiled doc, and `dataset_noise_document` marks noise docs. `corpus.load_docs` keeps only whitelisted metadata fields, so neither reaches the agent. Keep it that way, unless a condition deliberately uses `original_location` as an oracle.
 
 ```bash
-uv run pytest            # no API keys needed; corpus/question checks need the data and the bench checkout
+uv run pytest            # no API keys or network needed
 ```

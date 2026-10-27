@@ -17,7 +17,7 @@ Three directions to test:
 
 ## 2. Scope
 
-**Dataset.** [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench), restricted to its Confluence pages: polished wiki documentation, the closest match to the "organized knowledge" this project is about.
+**Dataset.** [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench), restricted to its Confluence pages: polished wiki documentation, the closest match to the "organized knowledge" this project is about. The corpus and the question sets (with gold answers) are copied into this repo, under `data/confluence/` and `data/questions/`.
 
 | Question set | Source | Count | Purpose |
 |---|---|---|---|
@@ -49,7 +49,7 @@ Three directions to test:
 
   The budget is 15 tool calls, after which the agent must call `finish`.
 - **Runner:** runs a question set with parallelism and resume, and writes `answers.jsonl` in the format the bench's evaluator expects. It also logs per-question efficiency metrics and full transcripts.
-- **Evaluation:** the bench's `metrics_based_eval` with `--no-correction` and one pinned judge model that is not the agent model.
+- **Evaluation:** our own `evaluate.py`, which reproduces the bench's `metrics_based_eval` with `--no-correction` (same judge prompts, same scoring), with one pinned judge model that is not the agent model.
 
 ### Experiment grid
 
@@ -88,7 +88,8 @@ Each cell is a TOML file in `configs/` that toggles tools or the indexed text. A
 | 2026-10-26 | Evaluate with `--no-correction` and one pinned judge that differs from the agent | Without it, the evaluator can rewrite gold sets per run, so cells would be scored against different ground truths. A separate judge avoids the agent grading itself. |
 | 2026-10-26 | Grid as config toggles, run in stages instead of a full factorial | A full factorial is about 10k agent runs before judging. |
 | 2026-10-26 | GitHub is the source of truth, and the company GitLab mirrors it | Contributors without GitLab access can work via GitHub pull requests. A firewalled GitLab can pull from GitHub, but GitHub can't push into it. |
-| 2026-10-26 | Corpus committed under `data/confluence/`; questions and the evaluator stay in a bench checkout | Gold questions and answers stay out of this repo, and out of public view. |
+| 2026-10-26 | Corpus committed under `data/confluence/`; questions and the evaluator stay in a bench checkout | Gold questions and answers stay out of this repo, and out of public view. *Superseded on 2026-10-27.* |
+| 2026-10-27 | Make the repo self-contained: the 96 questions with gold answers go into `data/questions/`, and our own evaluator reproduces the bench's scoring | Everything runs without an EnterpriseRAG-Bench checkout. The evaluator uses the bench's judge prompts verbatim (MIT) and never rewrites the gold set. The files carry the bench's canary string, but the gold answers are now public along with the repo. |
 
 ## 5. Risks and mitigations
 
@@ -97,7 +98,7 @@ Each cell is a TOML file in `configs/` that toggles tools or the indexed text. A
 | Leaked generator fields give away answers or the clean folder layout | Whitelist-based loader; tests check that the leak fields never reach the agent |
 | Filenames are LLM-written summaries, confounding the folder experiment | Hold filenames constant, or ablate them on purpose |
 | Ceiling effects: small corpus, strong lexical baseline | Treat efficiency as a primary metric; use tool budgets and a weaker agent model; do a reference run with a large model |
-| Gold sets drifting between cells | Always `--no-correction` |
+| Gold sets drifting between cells | Our evaluator never rewrites the gold set (equivalent to the bench's `--no-correction`) and refuses to mix judges within a run |
 | Low statistical power (n=64, about ±10pp) | Paired design, at least 3 repeats, paired tests |
 | Overfitting the design to the test questions | Freeze the grid before the first full run, or hold out about 20 questions as a dev set |
 | Moving files breaks path-based links (`related_pages`, in-body links) | Rewrite links when building F0–F3. Note that the metadata questions name spaces explicitly. |
@@ -113,12 +114,13 @@ Done
 - [x] Scope, grid, metrics and evaluation protocol defined.
 - [x] Baseline scaffold (branch `feat/baseline-scaffold`): corpus loader, hybrid search, agent loop, runner and tests.
 - [x] Embedding model settled: `text-embedding-3-large`.
+- [x] Repo is self-contained: questions with gold answers, plus a bench-compatible evaluator.
 
 Setup
 - [ ] Choose the agent model and endpoint, and set it in `configs/baseline.toml`. For Azure, set `OPENAI_BASE_URL`.
 - [ ] Confirm `text-embedding-3-large` is deployed on the company endpoint, and note the deployment name if it's Azure.
-- [ ] Choose and pin the judge model.
-- [ ] Decide repo visibility, and whether the corpus stays committed in a public repo.
+- [ ] Decide repo visibility, and whether the corpus and gold answers stay committed in a public repo.
+- [ ] Choose and pin the judge model (`JUDGE_MODEL`).
 - [ ] Set up the GitLab mirror from GitHub.
 - [ ] Build the index: `uv run python -m organizing_knowledge_for_agents.index`.
 
