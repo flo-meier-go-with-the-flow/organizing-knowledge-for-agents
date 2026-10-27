@@ -1,0 +1,41 @@
+{
+  "title": "Hosted model performance bar (catalog launch requirements) v1",
+  "space": "architecture-and-standards",
+  "author": "Ethan Park",
+  "owner_team": "engineering",
+  "status": "published",
+  "created_at": "2023-05-22",
+  "last_updated": "2023-09-14",
+  "reviewers": [
+    "Connor OBrien",
+    "Dev Patel"
+  ],
+  "labels": [
+    "performance",
+    "standards",
+    "slo",
+    "hosted-api",
+    "benchmarking"
+  ],
+  "confidentiality": "internal",
+  "body": "# Summary\nThis standard sets the minimum performance and reliability bar that any model must clear before it is added to the Hosted API catalog.\n\n# Scope\nCovers: chat/completions models served through the Hosted API, OpenAI-compatible routes included.\nExcludes: one-off private customer builds (see Private Deployments standards).\n\n# Owners\n- Standard owner: Serving Runtime\n- Enforcement: Release Engineering + SRE\n\n# Benchmark methodology (required)\nUse the `perf-canary` harness with these settings:\n- Hardware class: `A100-80GB` (default); add a second class only if Product requests it\n- Context sizes: 2k, 8k\n- Workload: prompt-length mix taken from the top-10 Hosted API routes\n- Concurrency: 1, 8, 32\n- Streaming: on\n\nRequired artifacts:\n- Perf suite run IDs\n- Raw logs attached to this Confluence page or linked from Drive\n- Summary table with p50/p95 TTFT and tokens/sec\n\n# Minimum bar for launch\nThe *candidate default config* must satisfy every item below.\n\n## Latency\n- TTFT p50 <= 1.5s (2k context)\n- TTFT p95 <= 3.0s (2k context)\n- TTFT p95 <= 5.0s (8k context)\n\n## Throughput\n- Sustained output tokens/sec per GPU >= family baseline minus 10%\n- Continuous batching stays enabled; any exception needs a written reason and Runtime signoff\n\n## Stability\n- No crash loops during a 32-concurrency soak test (30 minutes)\n- Error rate <= 0.5% for 2k and 8k tests\n- No upward memory trend during soak (KV cache leak check)\n\n# Launch decision and signoff\nSignoffs are recorded as links/comments on the model intake Linear ticket:\n- Serving Runtime: performance and stability\n- SRE: capacity and readiness\n- Release Engineering: rollout plan in place (see Platform runbook)\n\n# If the model fails the bar\n- If only TTFT fails and lowering default max_tokens fixes it, propose adjusted defaults and re-run the suite.\n- If throughput is short, try quantization profiles and kernel flags; a degraded model ships only with Product signoff and a note in the docs.\n\n# Related pages\n- Model launch evaluation gates (Applied ML and Evals)\n- Quant profile requirements for catalog (Applied ML and Evals)\n- Hosted model rollout and fallback runbook (Eng Platform)\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "body"
+  ],
+  "dataset_doc_uuid": "dsid_165936903b784a04b1e0fd5dc7238f05",
+  "data_classification": "internal",
+  "lifecycle_status": "archived",
+  "doc_classification": "policy",
+  "volatility": "changing",
+  "document_type": "technical_spec",
+  "audience_groups": [
+    "engineering",
+    "sre_oncall",
+    "ml_engineering"
+  ],
+  "product_area": [
+    "inference_runtime",
+    "evals"
+  ]
+}

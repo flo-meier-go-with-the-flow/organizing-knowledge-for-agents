@@ -1,0 +1,27 @@
+{
+  "title": "Guide: customer-managed audit log export setup (Private deployments)",
+  "space": "eng-private-deployments",
+  "author": "Ava Chen",
+  "owner_team": "engineering",
+  "status": "archived",
+  "created_at": "2024-09-16",
+  "last_updated": "2025-01-27",
+  "reviewers": [
+    "Connor OBrien",
+    "Priya Natarajan"
+  ],
+  "labels": [
+    "private",
+    "vpc",
+    "onprem",
+    "audit-logging",
+    "helm"
+  ],
+  "confidentiality": "restricted",
+  "content": "> **Archived 2025-03-05:** this page is superseded by \"Guide: configure customer-managed audit log export (Private deployments)\" and is kept for reference only.\n\n# Summary\nHow to turn on **customer-managed audit log export** for **Redwood Private** (VPC and on-prem). In Private mode the customer usually runs the cluster and network; Redwood ships the export connector in the platform bundle.\n\n# Preconditions\n- Redwood Private installed at a version that includes `audit-export-connector` (Private bundle v2.6.0+).\n- Destination bucket/container created by the customer with encryption and retention configured.\n- Customer has reviewed and accepted the security controls per contract/security questionnaire.\n\n# Supported sinks\n- AWS S3\n- Google Cloud Storage\n- Azure Blob Storage\n\n# Required inputs\nGather before making changes:\n- `sink`: s3|gcs|azure\n- `region`: destination region\n- `destination`: bucket/container name\n- `prefix`: object path prefix\n- `auth`: workload identity details\n- `network`: whether private endpoints are needed\n\n# Configuration (Helm values)\nConfigure the connector through the `redwood-private` Helm chart, for example:\n\n```yaml\nauditExport:\n  enabled: true\n  sink: s3\n  region: us-east-1\n  destination: customer-audit-logs-prod\n  prefix: redwood/org=acme/cluster=private-us-east\n  format: jsonl_gzip\n  batchSeconds: 300\n  maxBatchBytes: 10485760\n\n  auth:\n    mode: workload_identity\n    reference: <customer-specific-binding-or-role>\n\n  network:\n    requirePrivateEndpoint: true\n    dnsZone: <customer-private-dns-zone>\n```\n\n# Identity patterns\n## AWS (EKS)\n- IRSA (IAM Roles for Service Accounts); annotate the connector's service account with the role ARN.\n- Role policy allows `s3:PutObject` on the bucket/prefix, plus optional `s3:ListBucket` for prefix health checks.\n\n## GCP (GKE)\n- Workload Identity binding a GCP service account to the Kubernetes service account.\n- `storage.objectCreator` on the destination bucket, scoped as tightly as possible.\n\n## Azure (AKS)\n- Azure Workload Identity (federated) preferred.\n- `Storage Blob Data Contributor` scoped to the container.\n\n# Network requirements\n- For private-endpoint-only destinations the customer provides in-cluster DNS resolution and egress rules to the storage endpoints.\n- On-prem to cloud storage: document outbound proxy rules and any TLS inspection constraints.\n\n# Validation\n1. Restart the connector:\n```bash\nkubectl rollout restart deploy/audit-export-connector -n redwood-system\n```\n2. Check logs for successful writes and no repeated 401/403:\n```bash\nkubectl logs deploy/audit-export-connector -n redwood-system --tail=200\n```\n3. Objects should appear in the destination within 15 minutes.\n4. Verify no inference payload fields are present in the schema.\n\n# Ongoing operations\n- The customer owns destination lifecycle, cost, and retention.\n- Redwood Support assists with connector errors when the customer shares logs/metrics.\n- Suggested customer-side alerts:\n  - no new objects for > 60 minutes\n  - sustained 4xx/5xx from storage\n\n# Rollback\n- Set `auditExport.enabled=false` and redeploy.\n- Suspected data boundary issue: disable immediately and notify Redwood Security per the incident process.\n\n# Related pages\n- Security controls and approval gates\n- Audit log export architecture\n- Support intake SOP\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "content"
+  ],
+  "dataset_doc_uuid": "dsid_cf81c161dc94494bb11a79842443fa10"
+}

@@ -1,0 +1,41 @@
+{
+  "title": "Incremental stateful upgrade strategy for private deployments (2026)",
+  "space": "eng-private-deployments",
+  "author": "Priya Nambiar",
+  "owner_team": "engineering",
+  "status": "published",
+  "created_at": "2026-05-18",
+  "last_updated": "2026-08-27",
+  "reviewers": [
+    "Marco Alvarez"
+  ],
+  "labels": [
+    "private-deploy",
+    "upgrade",
+    "stateful",
+    "runbook"
+  ],
+  "related_pages": [
+    "/confluence/eng-private-deployments/day-2-ops/post-installation-telemetry-and-acceptance-checklist-2026"
+  ],
+  "confidentiality": "restricted",
+  "body": "> **Archived 2026-11-02:** this page is superseded by \"Incremental stateful upgrade strategy for private deployments\" and is kept for reference only.\n\nOverview\n\nPurpose: A repeatable, low-risk approach to upgrading stateful components in Redwood private deployments (VPC and on-prem). It explains why private upgrades differ from hosted ones, describes a staged pattern that avoids global halts, and lists verification gates, rollback paths, and example commands for KV cache, model shard sets, tokenizer versions and persistent infrastructure.\n\nScope\n- Private deployments managed by the Redwood control plane and customer-managed on-prem packages.\n- Runtime and stateful services: redwood-runtime pods, the kv-cache service, redis/etcd metadata clusters, and the model artifact store.\n- Control-plane-only upgrades are out of scope (see the control-plane upgrade runbook).\n\nWhy incremental and state-aware?\n- KV caches, shard layouts and tokenizer mappings cannot safely be swapped with a single rolling restart; doing so risks data loss, cache poisoning or model mismatch.\n- Private environments vary widely (k8s versions, storage, network), so gates must be deterministic and observable.\n\nRoles and ownership\n- Service Owner: serving-runtime team (engineering) coordinates the upgrade.\n- Onsite Customer Lead: customer engineer who validates on-prem steps.\n- SRE Oncall: handles traffic routing and emergency rollback.\n- Release Engineer: stages artifacts, manifests and release notes.\n\nPre-upgrade checklist\n1) Verify signed model artifacts, runtime container digests and helm chart SHA.\n2) Snapshot the metadata DB (etcd) and export the artifact store index.\n3) Export the KV cache to object storage if persistence is enabled.\n4) Capture a 24-72 hour telemetry baseline (request rate, p50/p95 latency, token cost, error rate).\n5) Prepare a deployment-specific smoke test suite.\n6) Communicate the maintenance and rollback windows to the customer.\n\nStaged upgrade pattern\n1) Shadow & Validation (stage 0)\n   - Run the new runtime next to the existing one in shadow mode with mirrored traffic where the mesh supports it.\n   - Check smoke tests and confirm identical output signatures for deterministic layers (tokenizer version, JSON schema).\n   - Duration: 1-3 hours.\n\n2) Read-Only Warmup (stage 1)\n   - Start new replicas read-only against the same artifact store; they do not register for KV write promotion.\n   - Warm the KV cache with synthetic queries until hit rate reaches expected levels.\n\n3) Incremental Traffic Admission (stage 2)\n   - Send 5-10% of production traffic to new replicas using weighted routing by route ID, never a global switch.\n   - Watch SLOs for 30-60 minutes per step: 5 -> 10 -> 25 -> 50 -> 100. Pause on any gate failure.\n\n4) State Promotion (stage 3)\n   - Promote new replicas to read/write after KV consistency checks pass, one shard group at a time to avoid split-brain.\n   - For etcd, do quorum-aware rolling upgrades: minority nodes first, check health, then the majority.\n\n5) Post-cutover validation (stage 4)\n   - Run acceptance prompts and the regression suite and compare output distributions with the baseline.\n   - Keep the previous version available for at least 2 hours for immediate rollback.\n\nGate criteria\n- Functional: 100% smoke test success; responses within schema and length limits.\n- Latency: p95 increase <= +20% from baseline and absolute p95 <= 300ms for typical low-latency workloads (adjust per customer SLO).\n- Errors: 5xx rate < 1% and no new error classes above historical frequency.\n- Quality: automated evals on a 200-prompt set within per-customer regression thresholds.\n- Resource: GPU memory within bounds and no OOMs across two peak-traffic cycles.\n\nRollback strategy\n- Fast path: revert traffic weights to the previous stable replica group. Default first step; completes within 1-2 minutes.\n- Safe path: if a data or schema migration happened, 1) quiesce writes to the migrated shard, 2) run the reconciliation job to restore metadata from snapshot, 3) restore the previous model index and restart the earlier runtime. Expect 30-120 minutes.\n\nPatterns for stateful elements\n- KV Cache: always warm in shadow mode; do not flush global caches during promotion unless compatibility demands it.\n- Model shard sets: replicate weights to standby replicas, then atomically switch shard ownership via the metadata DB mapping.\n- Tokenizer changes: run old and new tokenizers side by side and normalize for 24-72 hours before enforcing migration.\n- Persistent stores: publish immutable artifacts and swap pointers instead of mutating in place.\n\nExample commands\n- Deploy new runtime in shadow mode:\n\n```bash\nhelm upgrade --install redwood-runtime-v2 ./charts/redwood-runtime \\\n  --set-image=registry.redwood.internal/redwood-runtime:v2.2.0 \\\n  --set shadowMode.enabled=true \\\n  --set replicas=2 \\\n  --namespace redwood-private\n```\n\n- Shift traffic weight with rictl:\n\n```bash\nrictl traffic-weight --service redwood-runtime --from old:100 --to new:5\nrictl wait-gates --service redwood-runtime --timeout 15m --checks smoke,latency,errors\n```\n\n- Back up the artifact store index:\n\n```bash\naws s3 cp s3://customer-artifacts/index.json s3://customer-artifacts/backups/index-$(date +%F).json\n```\n\nMonitoring and acceptance checks\n- Traces must carry the upgrade-version tag; verify 20 representative end-to-end traces.\n- Alerts:\n  - redwood.requests.p95 (alert if > baseline * 1.2 for 15m)\n  - redwood.requests.error_rate (alert if > 1% sustained 5m)\n  - redwood.kv.hit_rate (warn if drop > 10%)\n  - node.oom.count (critical on any OOM)\n- Acceptance job: redwood-eval run --set customer-smoke --output s3://... --thresholds config.json\n\nKnown failure modes\n- Tokenizer changes that reassign token ids require side-by-side normalization.\n- If a replica fails during weight transfer, keep the older replica active and abort promotion.\n- Low-bandwidth sites: prefetch artifacts to local cache nodes during stage 0.\n\nQuick reference\n1) Shadow deploy and warm caches. 2) Confirm baseline and gates. 3) Admit 5% for 30m, then 25%, 50%, 100%. 4) Promote one shard group at a time. 5) Monitor for 2 hours after 100% before marking stable. 6) Roll back by weight revert, or follow the safe path if data was migrated.\n\nPost-upgrade actions\n- Record deviations and RCA for any failed gate.\n- Run the reconciliation job to confirm artifact references.\n- Close the change ticket with the customer lead.\n\nContacts and escalation\n- Serving runtime owner: serving-runtime@redwood.com\n- SRE oncall: sre-oncall@redwood.com\n- Release engineering: releases@redwood.com\n\nDocument history\n- 2026-05-18: Created by Priya Nambiar.\n- 2026-08-27: Updated gate thresholds after first on-prem upgrades. (This version is deprecated; use the current strategy page.)\n",
+  "title_field_name": "title",
+  "content_field_names": [
+    "body"
+  ],
+  "dataset_doc_uuid": "dsid_dbe35bd88b8b46db99369f278248c326",
+  "data_classification": "internal",
+  "lifecycle_status": "archived",
+  "doc_classification": "procedure",
+  "volatility": "changing",
+  "document_type": "runbook",
+  "audience_groups": [
+    "engineering",
+    "sre_oncall"
+  ],
+  "product_area": [
+    "private_deployment",
+    "inference_runtime"
+  ]
+}

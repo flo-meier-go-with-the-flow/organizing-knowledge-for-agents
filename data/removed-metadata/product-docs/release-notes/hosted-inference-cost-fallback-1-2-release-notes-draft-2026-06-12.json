@@ -1,0 +1,45 @@
+{
+  "title": "Hosted Inference: Cost-Fallback & Telemetry Normalization 1.2 Release Notes (Pre-release)",
+  "summary": "> **Archived 2026-06-30:** this page is superseded by \"Hosted Inference: Cost-Fallback & Telemetry Normalization 1.2 Release Notes\" and is kept for reference only.\n\nThe 1.2 release adds a Cost-Fallback policy engine to hosted inference and a normalized telemetry stage for cost attribution. The goal is clearer fallback visibility, billing signals that match runtime decisions, and less double-counting when requests fall through several model variants.",
+  "highlights": [
+    "Cost-Fallback engine: a deterministic policy layer that picks fallback variants using a configurable cost threshold plus fidelity constraints.",
+    "Telemetry Normalization v1: new pipeline stage that removes duplicate token-attribution events across variant handoffs and retries.",
+    "Fallback annotations per request, shown in Console and in API response headers.",
+    "Billing hook: optional trial mode that simulates invoicing changes for 14 days with no effect on charges.",
+    "SDK updates: client-side flag to opt into fallback transparency headers (Python/Node 1.2.0+)."
+  ],
+  "compatibility_notes": "Runtime and billing remain backward compatible. Consumers of legacy billing callbacks should make sure their webhook handlers accept the new 'x-redwood-fallback-reason' header. Upgrading the SDK is recommended for transparent fallback headers; clients that stay on older SDKs keep the previous response shape with less visibility.",
+  "impact_table": "| Area | Change | Customer Impact | Mitigation |\n|---|---|---|---|\n| Serving runtime | Cost-Fallback engine on by default for low-tier routes | Different model variants may be chosen at peak load | Use rollout controls / opt-out guide |\n| Billing & metering | Normalization deduplicates attribution events | Fewer 'per-token' invoiced events visible in reconciliations (expected) | Billing simulator; reconciliations align within the cycle |\n| Console | Fallback timeline and per-request annotations | Extra UI column and export fields | Docs + quickstart |\n| SDKs | New response headers and opt-in flags | No breakage, richer diagnostics | Upgrade to SDK 1.2.0+ |",
+  "rollout_timeline": "1) 2026-06-16: Canary on 5% of hosted traffic in us-west-2.\n2) 2026-06-23: Observability review; expand to 25% if no regressions.\n3) 2026-06-29: Billing reconciliation test with sandbox customers.\n4) Full worldwide enablement and billing switch: dates to be confirmed after reconciliation test.",
+  "upgrade_and_migration_steps": [
+    "Step 1: Check Cost-Fallback policy defaults under Console > Routing > Fallback Policies and flag routes with custom targeting.",
+    "Step 2: Enterprise contracts that require a locked variant should open a support ticket to pin the variant or opt out of Cost-Fallback.",
+    "Step 3: Update downstream billing webhook consumers to ignore unknown headers; optionally handle 'x-redwood-fallback-reason'.",
+    "Step 4: Turn on the Billing Simulator in Console > Billing > Simulators for a 14-day preview of normalized billing (no real charges).",
+    "Step 5: Move client SDKs to 1.2.0+ to receive fallback annotations in response headers."
+  ],
+  "configuration_table": "| Config | Default | Notes |\n|---|---:|---|\n| fallback.cost_threshold_pct | 30 | Percentage over baseline cost allowed before fallback triggers |\n| fallback.fidelity_floor | medium | Minimum fidelity for fallback target variants |\n| telemetry.dedup_window_ms | 500 | Window for de-duplicating token attribution events |\n| billing.simulator.enabled | false | Admin toggle for invoicing preview without charges |",
+  "telemetry_and_alerts": "Collected signals and monitoring:\n- Events: 'fallback.choice', 'fallback.eviction', 'telemetry.normalization.delta'.\n- Dashboards: 'Fallback Rate by Route', 'Normalized vs Raw Token Delta'.\n- Alerts: 'Fallback rate > 15% for 5m' (P2), 'Normalization delta > 10% for a billing window' (P3).\nIf fallback rates climb, check KV-cache hit rates, variant capacity and cost profiles. A normalization alert signals reconciliation variance; reach out to billing-ops before changing routing.",
+  "rollback_plan": "1) Set 'fallback.enabled' to false at service level (Console or API) to halt policy-based variant selection.\n2) Disable normalization via 'telemetry.normalization.enabled' = false in Admin feature-flags (safe for 1-hour windows).\n3) For invoice anomalies, enable billing.simulator, run reconciliation and ask finance-ops to hold invoice dispatch.\n4) Gather the last 72h of 'fallback.choice' and 'telemetry.normalization.delta' events and file an incident per the oncall runbook.",
+  "owners_and_contacts": "Product owner: Aisha R. Morales (aisha.morales@redwood.ai)\nEngineering lead: Marcus Li (marcus.li@redwood.ai)\nSRE oncall: #sre-oncall\nBilling ops: billing-ops@redwood.ai\nSupport: support@redwood.ai",
+  "known_issues": "- Under multi-region failover combined with a retry storm, deduplication can undercount attribution; SRE may raise dedup_window_ms temporarily.\n- SDKs older than 1.1.5 do not expose the new header metadata.\n- Customers behind third-party metering proxies that depend on raw token events should validate with the Billing Simulator first.",
+  "faq": "Q: Does normalized telemetry change my bill?\nA: It removes double-counting across retries and handoffs. Real usage is kept, though line items may shift. Check the Billing Simulator for projections.\n\nQ: Can Cost-Fallback be turned off per route?\nA: Yes, via per-route override in Console. Contracts needing strict variant selection should go through the account team.\n\nQ: What happens if early invoices show a >15% delta?\nA: Nothing is auto-billed unilaterally; billing ops will contact affected customers and reconcile manually.",
+  "post_release_actions": "- 2026-06-26: Run 72h reconciliation job for canary tenants and share results.\n- Support KB article and customer comms template: date TBD.\n- Retrospective for 1.3 planning: date TBD.",
+  "title_field_name": "title",
+  "content_field_names": [
+    "summary",
+    "highlights",
+    "compatibility_notes",
+    "impact_table",
+    "rollout_timeline",
+    "upgrade_and_migration_steps",
+    "configuration_table",
+    "telemetry_and_alerts",
+    "rollback_plan",
+    "known_issues",
+    "faq",
+    "post_release_actions",
+    "owners_and_contacts"
+  ],
+  "dataset_doc_uuid": "dsid_e37c2eba28ab4e8caf674881e45d28fd"
+}
