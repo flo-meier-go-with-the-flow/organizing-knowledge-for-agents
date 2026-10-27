@@ -6,6 +6,34 @@ The baseline is an agent built on the OpenAI Responses API. Its search tool does
 
 Goals, experiment grid, decision log and current status: [docs/embed-and-basic-agent-loop.md](docs/embed-and-basic-agent-loop.md).
 
+## How the agent works
+
+A deliberately minimal harness: one model, three tools, a fixed tool budget.
+
+```mermaid
+flowchart TD
+    Q([Question]) --> M["Model turn<br/>OpenAI Responses API"]
+    M -->|"search(query)"| S["search<br/>BM25 + dense vectors in Chroma, fused with RRF<br/>returns the top 5 full pages"]
+    M -->|"read_document(doc_id)"| R["read_document<br/>returns one full page"]
+    M -->|"finish(answer, doc_ids)"| F(["Done<br/>answers.jsonl + metrics + trace"])
+    M -.->|"plain text, no tool call"| N["Nudge: call finish<br/>(only once, a second text reply counts as the answer)"]
+    S --> C["Append the tool outputs and the model's<br/>reasoning items to the conversation"]
+    R --> C
+    C --> B{"15 tool calls used?"}
+    B -->|no| M
+    B -->|yes| X["Next turn may only call finish<br/>(forced via tool_choice)"]
+    X --> M
+    N --> M
+```
+
+- **One request per turn.** The model can call several tools in parallel within a turn, and each call is run and answered separately.
+- **The conversation only grows.** Tool outputs are appended, and so are the model's reasoning items (encrypted, since requests use `store=False`). A reasoning model therefore keeps its train of thought across tool calls.
+- **The budget is enforced per call.** If parallel calls would exceed it, the extra calls get a "budget exhausted" reply instead of running. Set the budget with `agent.max_tool_calls`.
+- **Where the code lives:**
+  - `agent.py`: the loop
+  - `tools.py`: tool definitions and how results are rendered
+  - `search.py`: hybrid search
+
 ## Setup
 
 Requires [uv](https://docs.astral.sh/uv/), which also installs the pinned Python 3.14 if needed.
