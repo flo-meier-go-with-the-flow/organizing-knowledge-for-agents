@@ -63,8 +63,8 @@ Order: pilot (10 questions) → baseline → one-factor-at-a-time sweeps → sma
 ## Decisions
 
 - **Stack:**
-  - Chroma for vectors, NVIDIA `nemotron-3-embed-1b` (self-hosted NIM) for embeddings, in-memory BM25, fused with RRF.
-  - Embedding inputs over the NIM's 4,096-token limit are truncated (`truncate="END"`, about 2% of pages).
+  - Chroma for vectors, OpenAI `text-embedding-3-large` for embeddings (same model as the bench's vector baseline), in-memory BM25, fused with RRF.
+  - No truncation is needed: the longest page is about 6,600 tokens, under the 8,191-token input limit.
   - A small OpenAI model from the company deployment runs the agent loop (Responses API) and writes answers.
 - **Baseline tools:**
   - `search`: top 5, full text, no metadata
@@ -79,7 +79,7 @@ Order: pilot (10 questions) → baseline → one-factor-at-a-time sweeps → sma
 
 Setup
 - [ ] Choose the agent model and endpoint (OpenAI vs Azure → `OPENAI_BASE_URL`) and set it in `configs/baseline.toml`.
-- [ ] Get the Nemotron NIM endpoint from IT, plus its NIM version, served model ID and max sequence length. Revisit truncation vs splitting if the limit is 4,096.
+- [ ] Confirm `text-embedding-3-large` is deployed on the company endpoint, and note the deployment name if it's Azure.
 - [ ] Choose and pin the judge model.
 - [ ] Decide repo visibility, and whether the benchmark corpus stays committed in a public repo.
 - [ ] Set up the GitLab mirror from GitHub.

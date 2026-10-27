@@ -29,17 +29,17 @@ class FakeEmbeddingsClient:
         )
 
 
-def test_embed_sends_nim_fields_and_keeps_order():
+def test_embed_keeps_input_order():
     client = FakeEmbeddingsClient()
-    embedder = Embedder("nvidia/nemotron-3-embed-1b", client=client)
+    embedder = Embedder("text-embedding-3-large", client=client)
 
-    vectors = embedder.embed(["a", "b", "c"], input_type="passage")
+    vectors = embedder.embed(["a", "b", "c"])
 
     assert vectors == [[0.0], [1.0], [2.0]]
-    assert client.requests[0]["extra_body"] == {"input_type": "passage", "truncate": "END"}
-    assert client.requests[0]["model"] == "nvidia/nemotron-3-embed-1b"
+    assert client.requests[0] == {"model": "text-embedding-3-large", "input": ["a", "b", "c"], "encoding_format": "float"}
     assert embedder.total_tokens == 7
 
 
 def test_collection_name_is_chroma_safe():
-    assert collection_name("m0", "nvidia/nemotron-3-embed-1b") == "confluence-m0-nvidia-nemotron-3-embed-1b"
+    assert collection_name("m0", "text-embedding-3-large") == "confluence-m0-text-embedding-3-large"
+    assert collection_name("m0", "org/my embedder") == "confluence-m0-org-my-embedder"

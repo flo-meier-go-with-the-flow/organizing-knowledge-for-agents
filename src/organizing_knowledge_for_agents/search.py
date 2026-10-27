@@ -1,4 +1,4 @@
-"""Hybrid search: Nemotron dense retrieval (Chroma) + BM25, fused with reciprocal rank fusion."""
+"""Hybrid search: OpenAI-embedding dense retrieval (Chroma) + BM25, fused with reciprocal rank fusion."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ class Searcher:
         return [self.doc_ids[i] for i in top if scores[i] > 0]
 
     def _dense_ranking(self, query: str) -> list[str]:
-        embedding = self.embedder.embed([query], input_type="query")[0]
+        embedding = self.embedder.embed([query])[0]
         result = self.collection.query(query_embeddings=[embedding], n_results=self.cfg.candidates, include=[])
         return result["ids"][0]
 

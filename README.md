@@ -2,13 +2,13 @@
 
 Experiments on how data structure (metadata, progressive disclosure, folder layout) affects agentic retrieval, using the Confluence slice of [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench).
 
-The baseline is an agent built on the OpenAI Responses API. Its search tool does hybrid retrieval: Nemotron Embed vectors (served by an NVIDIA NIM) in Chroma plus in-memory BM25, fused with reciprocal rank fusion. Every grid cell runs the same agent loop; conditions differ only in config toggles for the tools and the indexed text.
+The baseline is an agent built on the OpenAI Responses API. Its search tool does hybrid retrieval: OpenAI `text-embedding-3-large` vectors in Chroma plus in-memory BM25, fused with reciprocal rank fusion. Every grid cell runs the same agent loop; conditions differ only in config toggles for the tools and the indexed text.
 
 ## Setup
 
 ```bash
 uv sync
-cp .env.example .env   # fill in OPENAI_API_KEY, EMBED_BASE_URL (and OPENAI_BASE_URL for a company endpoint)
+cp .env.example .env   # fill in OPENAI_API_KEY (and OPENAI_BASE_URL for a company endpoint)
 ```
 
 The Confluence corpus is committed under `data/confluence/`. The questions and the evaluator come from an EnterpriseRAG-Bench checkout, expected at `../EnterpriseRAG-Bench`. Set `ERB_ROOT` if it lives elsewhere:
@@ -20,14 +20,15 @@ git clone https://github.com/onyx-dot-app/EnterpriseRAG-Bench.git ../EnterpriseR
 ## 1. Build the index (once per text variant)
 
 ```bash
-uv run python -m organizing_knowledge_for_agents.index            # nemotron-3-embed-1b, variant m0 (title + content)
+uv run python -m organizing_knowledge_for_agents.index            # text-embedding-3-large, variant m0 (title + content)
 ```
 
 This embeds 5,189 docs (about 13M tokens) into `data/chroma/`. If it's interrupted, re-running the same command resumes.
 
-Embeddings come from the NIM's OpenAI-compatible `/v1/embeddings` endpoint, called through the `openai` SDK:
-- Documents are indexed with `input_type="passage"` and queries with `"query"`.
-- NIM 2.2 serves `nemotron-3-embed-1b` with a 4,096-token limit, so longer inputs are truncated at the end (`truncate="END"`). This affects about 2% of the pages.
+Embeddings use the same OpenAI endpoint and key as the agent, unless `EMBED_BASE_URL` / `EMBED_API_KEY` are set:
+- On Azure, set `EMBED_MODEL` to the deployment name.
+- The longest page is about 6,600 tokens, under the model's 8,191-token input limit, so nothing is truncated.
+- `text-embedding-3-large` is also what EnterpriseRAG-Bench's own vector baseline uses, so dense-retrieval results are comparable.
 
 ## 2. Run the agent
 
@@ -81,7 +82,7 @@ src/organizing_knowledge_for_agents/
   settings.py   paths, env, experiment config (TOML -> dataclasses)
   corpus.py     load + clean docs (whitelisted metadata only), text variants
   questions.py  question sets
-  embeddings.py Nemotron Embed client (NIM, OpenAI-compatible API)
+  embeddings.py OpenAI embeddings client (text-embedding-3-large)
   index.py      embeddings -> Chroma indexing (resumable)
   search.py     hybrid search (dense + BM25, RRF)
   tools.py      agent tools and their rendering; grid toggles live here

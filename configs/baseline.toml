@@ -14,7 +14,7 @@ k = 5
 candidates = 50
 rrf_k = 60
 text_variant = "m0"           # title + content; must match an indexed collection
-embedding_model = "nvidia/nemotron-3-embed-1b"  # must match the indexed collection
+embedding_model = "text-embedding-3-large"  # must match the indexed collection
 
 [tools]
 result_view = "full"          # full | preview (progressive-disclosure stand-in)

@@ -20,10 +20,11 @@ ERB_ROOT = Path(os.environ.get("ERB_ROOT", PROJECT_ROOT.parent / "EnterpriseRAG-
 CHROMA_DIR = Path(os.environ.get("CHROMA_DIR", PROJECT_ROOT / "data" / "chroma")).resolve()
 RUNS_DIR = Path(os.environ.get("RUNS_DIR", PROJECT_ROOT / "runs")).resolve()
 
-# Embedding endpoint: an NVIDIA NIM serving Nemotron Embed (OpenAI-compatible API).
+# Embeddings: OpenAI text-embedding-3-large. Set EMBED_BASE_URL / EMBED_API_KEY only if
+# embeddings live on a different endpoint than the agent model.
 EMBED_BASE_URL = os.environ.get("EMBED_BASE_URL", "")
 EMBED_API_KEY = os.environ.get("EMBED_API_KEY", "")
-EMBED_MODEL = os.environ.get("EMBED_MODEL", "nvidia/nemotron-3-embed-1b")
+EMBED_MODEL = os.environ.get("EMBED_MODEL", "text-embedding-3-large")
 
 
 @dataclass

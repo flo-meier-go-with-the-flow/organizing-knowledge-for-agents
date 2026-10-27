@@ -1,4 +1,4 @@
-"""Embed the corpus with Nemotron Embed (NIM) and store it in a persistent Chroma collection.
+"""Embed the corpus with OpenAI text-embedding-3-large and store it in a persistent Chroma collection.
 
 Usage:
     uv run python -m organizing_knowledge_for_agents.index [--variant m0] [--model MODEL] [--batch-size 32] [--rebuild]
@@ -22,7 +22,7 @@ from organizing_knowledge_for_agents.settings import CHROMA_DIR, EMBED_MODEL
 
 
 def collection_name(variant: str, model: str) -> str:
-    # Chroma names allow only [a-zA-Z0-9._-]; model IDs like nvidia/nemotron-3-embed-1b contain '/'.
+    # Chroma names allow only [a-zA-Z0-9._-]; some model or deployment IDs contain '/' or spaces.
     return re.sub(r"[^a-zA-Z0-9._-]", "-", f"confluence-{variant}-{model}")
 
 
@@ -56,7 +56,7 @@ def build_index(variant: str, model: str, batch_size: int, rebuild: bool = False
             texts = [render_text(doc, variant) for doc in batch]
             collection.add(
                 ids=[doc.doc_id for doc in batch],
-                embeddings=embedder.embed(texts, input_type="passage"),
+                embeddings=embedder.embed(texts),
                 documents=texts,
                 metadatas=[chroma_metadata(doc) for doc in batch],
             )
@@ -69,8 +69,10 @@ def build_index(variant: str, model: str, batch_size: int, rebuild: bool = False
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--variant", default="m0", help="Document rendering to index (corpus.render_text)")
-    parser.add_argument("--model", default=EMBED_MODEL, help="Embedding model ID served by the NIM")
-    parser.add_argument("--batch-size", type=int, default=32, help="Docs per request (NIM caps batch size)")
+    parser.add_argument("--model", default=EMBED_MODEL, help="Embedding model (on Azure: the deployment name)")
+    parser.add_argument(
+        "--batch-size", type=int, default=32, help="Docs per request (OpenAI caps a request at 300k tokens in total)"
+    )
     parser.add_argument("--rebuild", action="store_true", help="Drop and re-create the collection")
     args = parser.parse_args()
     build_index(args.variant, args.model, args.batch_size, args.rebuild)
