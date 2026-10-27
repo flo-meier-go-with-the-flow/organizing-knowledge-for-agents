@@ -3,6 +3,5 @@ __pycache__/
 *.pyc
 .env
 .pytest_cache/
-# Generated: vector index and experiment outputs (runs contain benchmark questions and answers)
-data/chroma/
 runs/
+data/chroma
