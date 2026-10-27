@@ -3,7 +3,7 @@
 name = "baseline"
 
 [agent]
-model = "gpt-5-mini"          # set to your company deployment (or override with --model)
+model = "GPT-6-luna"          # set to your company deployment (or override with --model)
 reasoning_effort = "medium"   # "" for non-reasoning models
 max_tool_calls = 15
 max_output_tokens = 16000
