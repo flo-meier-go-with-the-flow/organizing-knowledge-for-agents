@@ -8,6 +8,8 @@ Goals, experiment grid, decision log and current status: [docs/embed-and-basic-a
 
 ## Setup
 
+Requires [uv](https://docs.astral.sh/uv/), which also installs the pinned Python 3.14 if needed.
+
 ```bash
 uv sync
 cp .env.example .env   # fill in OPENAI_API_KEY (and OPENAI_BASE_URL for a company endpoint)
@@ -25,7 +27,7 @@ git clone https://github.com/onyx-dot-app/EnterpriseRAG-Bench.git ../EnterpriseR
 uv run python -m organizing_knowledge_for_agents.index            # text-embedding-3-large, variant m0 (title + content)
 ```
 
-This embeds 5,189 docs (about 13M tokens) into `data/chroma/`. If it's interrupted, re-running the same command resumes.
+This embeds 5,189 docs (about 11.5M tokens) into `data/chroma/`. If it's interrupted, re-running the same command resumes.
 
 Embeddings use the same OpenAI endpoint and key as the agent, unless `EMBED_BASE_URL` / `EMBED_API_KEY` are set:
 - On Azure, set `EMBED_MODEL` to the deployment name.
@@ -63,6 +65,7 @@ Runs resume, and questions that errored are retried on the next invocation. Agen
 The evaluator lives in the bench repo and needs its dependencies. Pin one judge model for the whole study. Don't use the small agent model as the judge.
 
 ```bash
+set -a; source .env; set +a   # export OPENAI_API_KEY (and OPENAI_BASE_URL) for the evaluator
 cd ../EnterpriseRAG-Bench
 RUN=../organizing-knowledge-for-agents/runs/baseline/gpt-5-mini/confluence/r0
 LLM_PROVIDER=openai LLM_API_KEY=$OPENAI_API_KEY LLM_MODEL_NAME=<judge model> \
@@ -75,7 +78,7 @@ uv run --no-project --with-requirements requirements.txt \
     --no-correction --parallelism 8
 ```
 
-`--no-correction` keeps the gold set fixed. Without it, the evaluator can rewrite gold docs and answer facts based on what each run retrieved, so different cells would be scored against different ground truths. For a company endpoint, also export `OPENAI_BASE_URL`; the bench's OpenAI client picks it up.
+`--no-correction` keeps the gold set fixed. Without it, the evaluator can rewrite gold docs and answer facts based on what each run retrieved, so different cells would be scored against different ground truths. The evaluator doesn't read this repo's `.env`, which is why the first line exports it. That also passes on `OPENAI_BASE_URL`, so the judge runs against your company endpoint too. For the `metadata` set, use `--questions-file extra_questions.jsonl`.
 
 ## Layout
 
