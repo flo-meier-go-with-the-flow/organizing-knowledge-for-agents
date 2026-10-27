@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 
+import httpx
 import pytest
+from openai import APIConnectionError
 
 from organizing_knowledge_for_agents.evaluate import compute_stats, evaluate_run, score_answer
 from organizing_knowledge_for_agents.questions import load_question_set
@@ -71,6 +73,17 @@ def test_empty_answer_scores_zero_without_judge_calls():
 def test_failed_fact_check_zeroes_completeness():
     row = score_answer(FakeJudge(fail_facts=True), QUESTION, {"answer": "20 PTO days", "document_ids": ["dsid_a"]})
     assert row["completeness_pct"] == 0.0 and row["answer_correct"] is True
+
+
+def test_api_failure_leaves_question_unscored():
+    class UnreachableJudge(FakeJudge):
+        def ask(self, prompt: str) -> str:
+            if prompt.startswith("You are an answer validator"):
+                raise APIConnectionError(request=httpx.Request("POST", "https://judge.invalid"))
+            return super().ask(prompt)
+
+    with pytest.raises(APIConnectionError):
+        score_answer(UnreachableJudge(), QUESTION, {"answer": "20 PTO days", "document_ids": ["dsid_a"]})
 
 
 def test_compute_stats():

@@ -74,7 +74,8 @@ def run(cfg: ExperimentConfig, question_set: str, repeat: int, parallelism: int,
     print(f"{cfg.name} / {cfg.agent.model} / {question_set} / r{repeat}: {len(questions)} questions, {len(done)} done, {len(todo)} to run")
 
     toolbox = ToolBox(Searcher(cfg.retrieval), cfg.tools)
-    client = OpenAI(max_retries=5)  # reads OPENAI_API_KEY and OPENAI_BASE_URL
+    # Reads OPENAI_API_KEY and OPENAI_BASE_URL. The 600 s default timeout lets a stuck request block a worker for an hour.
+    client = OpenAI(max_retries=5, timeout=180)
     lock = threading.Lock()
 
     def append(name: str, row: dict) -> None:

@@ -25,7 +25,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-from openai import OpenAI
+from openai import APIConnectionError, InternalServerError, OpenAI, RateLimitError
 from tqdm import tqdm
 
 from organizing_knowledge_for_agents.eval_prompts import (
@@ -37,6 +37,10 @@ from organizing_knowledge_for_agents.jsonl import read_jsonl
 from organizing_knowledge_for_agents.questions import load_question_set
 
 MAX_ATTEMPTS = 3  # the bench retries each judge call up to 3 times
+# API failures that outlast the client's retries (timeouts are APIConnectionErrors). They are
+# re-raised so the question stays unscored and is retried on the next run, instead of being
+# scored like the bench's unusable judge output (wrong answer, zero completeness).
+TRANSIENT = (APIConnectionError, InternalServerError, RateLimitError)
 DSID = re.compile(r"dsid_[a-f0-9]{20,32}")
 YES = re.compile(r"\byes\b", re.IGNORECASE)
 
@@ -45,7 +49,7 @@ class Judge:
     def __init__(self, model: str, reasoning_effort: str = "medium", client: OpenAI | None = None):
         self.model = model
         self.reasoning_effort = reasoning_effort
-        self.client = client or OpenAI(max_retries=5)  # reads OPENAI_API_KEY and OPENAI_BASE_URL
+        self.client = client or OpenAI(max_retries=5, timeout=180)  # reads OPENAI_API_KEY and OPENAI_BASE_URL
 
     def ask(self, prompt: str) -> str:
         kwargs: dict = {"model": self.model, "input": prompt, "store": False}
@@ -58,6 +62,8 @@ def strip_citations(judge: Judge, answer: str) -> str:
     """LLM pass that removes citations, then drop any remaining dsid_ references (as the bench does)."""
     try:
         stripped = judge.ask(ANSWER_CITATION_STRIPPING_PROMPT.format(answer_string=answer)) or answer
+    except TRANSIENT:
+        raise
     except Exception:
         stripped = answer  # the bench keeps the original answer if stripping fails
     return re.sub(r" {2,}", " ", DSID.sub("", stripped)).strip()
@@ -73,6 +79,8 @@ def judge_correctness(judge: Judge, question: str, gold_answer: str, answer: str
     for _ in range(MAX_ATTEMPTS):
         try:
             parsed = _json_object(judge.ask(prompt))
+        except TRANSIENT:
+            raise
         except Exception:
             continue
         if isinstance(parsed, dict) and isinstance(parsed.get("aligned"), str):
@@ -86,6 +94,8 @@ def judge_fact(judge: Judge, answer: str, fact: str) -> bool:
         try:
             lines = judge.ask(prompt).splitlines()
             return bool(lines) and YES.search(lines[0]) is not None
+        except TRANSIENT:
+            raise
         except Exception:
             if attempt == MAX_ATTEMPTS - 1:
                 raise
@@ -113,6 +123,8 @@ def score_answer(judge: Judge, question: dict, answer_row: dict, strip: bool = T
             fact_checks = [pool.submit(judge_fact, judge, answer, fact) for fact in facts]
             try:
                 completeness = 100 * sum(f.result() for f in fact_checks) / len(facts) if facts else 100.0
+            except TRANSIENT:
+                raise
             except Exception:
                 completeness = 0.0  # the bench scores completeness 0 if any fact check fails
             correct, reason = correctness.result() if correctness else (True, "")
