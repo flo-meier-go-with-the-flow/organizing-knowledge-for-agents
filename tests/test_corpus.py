@@ -1,15 +1,18 @@
-"""Checks against the committed corpus (data/confluence) and question sets (data/questions)."""
+"""Checks against the committed corpora (data/<corpus>) and question sets (data/questions)."""
 
 from __future__ import annotations
 
-from organizing_knowledge_for_agents.corpus import chroma_metadata, load_corpus
+import pytest
+
+from organizing_knowledge_for_agents.corpus import chroma_metadata, load_corpus, render_text
 from organizing_knowledge_for_agents.questions import load_question_set
 from organizing_knowledge_for_agents.search import Searcher
-from organizing_knowledge_for_agents.settings import RetrievalConfig
+from organizing_knowledge_for_agents.settings import CORPORA, RetrievalConfig
 
 
-def test_corpus_is_clean():
-    corpus = load_corpus()
+@pytest.mark.parametrize("name", CORPORA)
+def test_corpus_is_clean(name):
+    corpus = load_corpus(name)
     assert len(corpus) == 5189
     for doc in corpus.values():
         assert "original_location" not in doc.metadata
@@ -19,6 +22,17 @@ def test_corpus_is_clean():
         assert "\n\noriginal_location:\n" not in doc.content
         meta = chroma_metadata(doc)
         assert all(v not in (None, "", []) for v in meta.values())
+
+
+def test_corpora_differ_only_in_metadata():
+    # Identical pages and text, so one set of vectors serves all three collections.
+    original, generated, removed = (load_corpus(name) for name in CORPORA)
+    assert original.keys() == generated.keys() == removed.keys()
+    for doc_id, doc in original.items():
+        assert render_text(doc) == render_text(generated[doc_id]) == render_text(removed[doc_id])
+        assert all(generated[doc_id].metadata.get(key) == value for key, value in doc.metadata.items())
+        assert removed[doc_id].metadata == {}
+    assert any("document_type" in doc.metadata for doc in generated.values())
 
 
 def test_question_sets():

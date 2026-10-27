@@ -84,19 +84,26 @@ cp .env.example .env   # fill in OPENAI_API_KEY, JUDGE_MODEL (and OPENAI_BASE_UR
 ```
 
 Everything needed is in this repo:
-- the corpus in `data/confluence/`
+- the corpus in three versions with the same 5,189 pages, titles and bodies, which differ only in metadata:
+  - `data/original/`: the Confluence export with its native metadata (space, author, status, dates, labels, ...)
+  - `data/generated-metadata/`: the native metadata plus LLM-generated tags (document type, lifecycle status, audience, product area, ...); see `data/metadata-pipeline/`
+  - `data/removed-metadata/`: title and body only
 - the question sets with gold answers in `data/questions/`
 - the evaluator
 
 No EnterpriseRAG-Bench checkout is required. Both datasets come from [EnterpriseRAG-Bench](https://github.com/onyx-dot-app/EnterpriseRAG-Bench) (MIT); see [`data/questions/README.md`](data/questions/README.md) for provenance.
 
-## 1. Build the index (once per text variant)
+## 1. Build the index (once per corpus and text variant)
 
 ```bash
-uv run python -m organizing_knowledge_for_agents.index            # text-embedding-3-large, variant m0 (title + content)
+uv run python -m organizing_knowledge_for_agents.index --corpus original            # text-embedding-3-large, variant m0 (title + content)
+uv run python -m organizing_knowledge_for_agents.index --corpus generated-metadata
+uv run python -m organizing_knowledge_for_agents.index --corpus removed-metadata
 ```
 
-This embeds 5,189 docs (about 11.5M tokens) into `data/chroma/`. If it's interrupted, re-running the same command resumes.
+Each corpus gets its own Chroma collection in `data/chroma/` (`<corpus>-<variant>-<model>`), with the same vectors and that corpus's metadata. The first build embeds 5,189 docs (about 11.5M tokens). Later builds copy the vectors from any collection of the same model that stores the identical text, so the other two corpora cost no API calls. If a build is interrupted, re-running the same command resumes.
+
+Search ranks the stored vectors exactly instead of using Chroma's approximate HNSW index. HNSW returned only about 95% of the exact top 50 here, and its graph differs per collection, so corpora with identical vectors would have ranked differently.
 
 Embeddings use the same OpenAI endpoint and key as the agent, unless `EMBED_BASE_URL` / `EMBED_API_KEY` are set:
 - On Azure, set `EMBED_MODEL` to the deployment name.
@@ -166,7 +173,9 @@ src/organizing_knowledge_for_agents/
   jsonl.py      JSONL helper
   import_questions.py  regenerates data/questions/ from a bench checkout (rarely needed)
 configs/        one TOML per grid cell
-data/confluence the corpus (raw EnterpriseRAG-Bench JSON)
+data/original, data/generated-metadata, data/removed-metadata
+                the corpus (raw EnterpriseRAG-Bench JSON) in three metadata versions
+data/metadata-pipeline  how the generated tags were made (tags, taxonomy, report)
 data/questions  question sets with gold answers
 licenses/       EnterpriseRAG-Bench MIT license (data and judge prompts)
 tests/          agent loop, evaluator, embeddings and corpus tests (no API keys needed)
@@ -177,11 +186,17 @@ tests/          agent loop, evaluator, embeddings and corpus tests (no API keys 
 1. Copy `configs/baseline.toml` and give it a unique `name`.
 2. Change one dimension:
    - **Progressive disclosure:** `tools.result_view = "preview"`. Search then returns previews, and the agent must call `read_document`.
+   - **Which metadata exists:** `retrieval.corpus = "original" | "generated-metadata" | "removed-metadata"`.
    - **Metadata visible:** `tools.show_metadata = true`.
+   - **Metadata filters:** `tools.metadata_filters = true`. The `search` tool gets optional filter arguments for the fields the corpus has: closed vocabularies (space, status, document type, ...) as enums, author (case-insensitive), and `updated_after` / `updated_before`. Chroma evaluates the filter, and both BM25 and dense search are restricted to the matching pages. The result says how many pages the filters match.
+   - **Metadata in BM25:** `retrieval.metadata_in_bm25 = true`. BM25 also indexes each page's metadata, with dates spelled out as month and year; the embeddings are unchanged.
+   - **Recency pushdown:** `retrieval.recency_weight` (0 = off). A newest-first ranking of the top `recency_depth` fused candidates is fused in with this weight, so older look-alikes drop below newer pages. Pages without a date are unaffected.
    - **New indexed text** (e.g. metadata in the embedding): add a variant in `corpus.render_text`, index it with `--variant`, and set `retrieval.text_variant`.
-   - **New tools** (folder navigation, metadata filters, outlines): add them in `tools.py` behind a `ToolsConfig` flag.
+   - **New tools** (folder navigation, outlines): add them in `tools.py` behind a `ToolsConfig` flag.
 
-The raw JSON in `data/confluence/` contains generator artifacts. `original_location` is the pre-noise folder of a misfiled doc, and `dataset_noise_document` marks noise docs. `corpus.load_docs` keeps only whitelisted metadata fields, so neither reaches the agent. Keep it that way, unless a condition deliberately uses `original_location` as an oracle.
+The `meta-removed`, `meta-original` and `meta-generated` configs turn on every metadata option above and differ only in the corpus. Their recency settings (weight 0.5, depth 20) came from an offline replay of the baseline agent's logged queries on the same questions: two coarse settings, not a tuned fit, but report them as chosen on the test set.
+
+The raw JSON in `data/original/` contains generator artifacts. `original_location` is the pre-noise folder of a misfiled doc, and `dataset_noise_document` marks noise docs. `corpus.load_docs` keeps only whitelisted metadata fields, so neither reaches the agent. Keep it that way, unless a condition deliberately uses `original_location` as an oracle.
 
 ```bash
 uv run pytest            # no API keys or network needed

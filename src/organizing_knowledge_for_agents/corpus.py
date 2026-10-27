@@ -1,5 +1,9 @@
 """Load and clean the Confluence slice of EnterpriseRAG-Bench.
 
+The corpus comes in three versions (settings.CORPORA) with the same pages, titles
+and bodies: `original` has the native metadata, `generated-metadata` adds
+LLM-generated tags, and `removed-metadata` has none.
+
 Only whitelisted fields survive loading. Generator artifacts such as
 `original_location` (the pre-noise folder) and `dataset_noise_document` are
 dropped here so no downstream component can leak them to the agent.
@@ -7,6 +11,7 @@ dropped here so no downstream component can leak them to the agent.
 
 from __future__ import annotations
 
+import calendar
 import json
 import re
 from dataclasses import dataclass, field
@@ -14,9 +19,10 @@ from datetime import date
 from functools import lru_cache
 from pathlib import Path
 
-from organizing_knowledge_for_agents.settings import CONFLUENCE_DIR
+from organizing_knowledge_for_agents.settings import CORPORA, DATA_DIR
 
 METADATA_FIELDS = (
+    # native Confluence metadata
     "space",
     "author",
     "owner_team",
@@ -27,8 +33,16 @@ METADATA_FIELDS = (
     "labels",
     "related_pages",
     "confidentiality",
+    # generated tags (generated-metadata only)
+    "document_type",
+    "doc_classification",
+    "lifecycle_status",
+    "volatility",
+    "data_classification",
+    "audience_groups",
+    "product_area",
 )
-LIST_FIELDS = {"reviewers", "labels", "related_pages"}
+LIST_FIELDS = {"reviewers", "labels", "related_pages", "audience_groups", "product_area"}
 DATE_FIELDS = {"created_at", "last_updated"}
 
 
@@ -62,6 +76,8 @@ def _render_content(raw: dict) -> str:
 def _clean_metadata(raw: dict) -> dict:
     meta = {}
     for key in METADATA_FIELDS:
+        if key in raw["content_field_names"]:
+            continue  # part of the body on a few pages (related_pages on 3), already in the content
         value = raw.get(key)
         if value is None or value == "" or value == []:
             continue
@@ -73,7 +89,7 @@ def _clean_metadata(raw: dict) -> dict:
     return meta
 
 
-def load_docs(root: Path = CONFLUENCE_DIR) -> list[Doc]:
+def load_docs(root: Path) -> list[Doc]:
     docs = []
     for path in sorted(root.rglob("*.json")):
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -89,9 +105,14 @@ def load_docs(root: Path = CONFLUENCE_DIR) -> list[Doc]:
     return docs
 
 
-@lru_cache(maxsize=1)
-def load_corpus() -> dict[str, Doc]:
-    return {doc.doc_id: doc for doc in load_docs()}
+@lru_cache(maxsize=None)
+def load_corpus(corpus: str = "original") -> dict[str, Doc]:
+    if corpus not in CORPORA:
+        raise ValueError(f"Unknown corpus {corpus!r}, expected one of {CORPORA}")
+    docs = {doc.doc_id: doc for doc in load_docs(DATA_DIR / corpus)}
+    if not docs:
+        raise RuntimeError(f"No pages found in {DATA_DIR / corpus}")
+    return docs
 
 
 def render_text(doc: Doc, variant: str = "m0") -> str:
@@ -102,6 +123,26 @@ def render_text(doc: Doc, variant: str = "m0") -> str:
     if variant == "m0":
         return f"{doc.title}\n\n{doc.content}"
     raise ValueError(f"Unknown text variant: {variant}")
+
+
+def metadata_text(doc: Doc) -> str:
+    """A page's metadata as words for BM25, with dates also as month and year ("March 2026").
+
+    related_pages is left out: its paths would make a page match its neighbours' topics.
+    Underscores become spaces so tags like `sre_oncall` match the words in a query.
+    """
+    lines = []
+    for key, value in doc.metadata.items():
+        if key == "related_pages":
+            continue
+        if key in DATE_FIELDS:
+            as_int = date_to_int(value)
+            if as_int is not None:
+                value = f"{value} {calendar.month_name[as_int // 100 % 100]} {as_int // 10000}"
+        elif isinstance(value, list):
+            value = ", ".join(value)
+        lines.append(f"{key}: {value}".replace("_", " "))
+    return "\n".join(lines)
 
 
 def date_to_int(value: str) -> int | None:

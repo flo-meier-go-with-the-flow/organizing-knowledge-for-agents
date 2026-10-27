@@ -1,0 +1,28 @@
+# Metadata condition: the removed-metadata corpus, with its metadata shown in results, usable as search
+# filters, indexed by BM25, and driving the recency pushdown. The three meta-* configs differ only
+# in [retrieval].corpus, so any difference between them comes from the metadata itself.
+name = "meta-removed"
+
+[agent]
+model = "gpt-6.1-terra"
+reasoning_effort = "medium"
+max_tool_calls = 15
+max_output_tokens = 16000
+
+[retrieval]
+corpus = "removed-metadata"
+mode = "hybrid"
+k = 5
+candidates = 50
+rrf_k = 60
+text_variant = "m0"
+embedding_model = "text-embedding-3-large"
+metadata_in_bm25 = true
+recency_weight = 0.5          # chosen by an offline replay of logged queries; see README
+recency_depth = 20
+
+[tools]
+result_view = "full"
+preview_chars = 400
+show_metadata = true
+metadata_filters = true

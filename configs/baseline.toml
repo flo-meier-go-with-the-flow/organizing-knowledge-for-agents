@@ -9,6 +9,7 @@ max_tool_calls = 15
 max_output_tokens = 16000
 
 [retrieval]
+corpus = "original"           # original | generated-metadata | removed-metadata (data/<corpus>)
 mode = "hybrid"               # hybrid | dense | bm25
 k = 5
 candidates = 50

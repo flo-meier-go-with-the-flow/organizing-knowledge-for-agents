@@ -12,8 +12,10 @@ from dotenv import load_dotenv
 PROJECT_ROOT = Path(__file__).resolve().parents[2]  # src/<package>/settings.py -> repo root
 load_dotenv(PROJECT_ROOT / ".env")
 
-# Corpus and question sets (with gold answers) are committed to this repo.
-CONFLUENCE_DIR = Path(os.environ.get("CONFLUENCE_DIR", PROJECT_ROOT / "data" / "confluence")).resolve()
+# Corpus and question sets (with gold answers) are committed to this repo. The corpus comes in
+# three versions under DATA_DIR with identical titles and bodies; they differ only in metadata.
+DATA_DIR = Path(os.environ.get("DATA_DIR", PROJECT_ROOT / "data")).resolve()
+CORPORA = ("original", "generated-metadata", "removed-metadata")
 QUESTIONS_DIR = Path(os.environ.get("QUESTIONS_DIR", PROJECT_ROOT / "data" / "questions")).resolve()
 
 CHROMA_DIR = Path(os.environ.get("CHROMA_DIR", PROJECT_ROOT / "data" / "chroma")).resolve()
@@ -37,12 +39,18 @@ class AgentConfig:
 
 @dataclass
 class RetrievalConfig:
+    corpus: str = "original"  # one of CORPORA, loaded from DATA_DIR/<corpus>
     mode: str = "hybrid"  # hybrid | dense | bm25
     k: int = 5
     candidates: int = 50  # per retriever, before fusion
     rrf_k: int = 60
     text_variant: str = "m0"  # which document rendering was indexed (see corpus.render_text)
     embedding_model: str = EMBED_MODEL
+    metadata_in_bm25: bool = False  # BM25 also indexes each page's metadata; embeddings are unchanged
+    # Recency pushdown: a newest-first ranking of the top fused candidates, fused in with this
+    # weight. Pages without a last_updated date get no boost; 0 turns it off.
+    recency_weight: float = 0.0
+    recency_depth: int = 20
 
 
 @dataclass
@@ -50,6 +58,7 @@ class ToolsConfig:
     result_view: str = "full"  # full | preview
     preview_chars: int = 400
     show_metadata: bool = False
+    metadata_filters: bool = False  # search takes optional filters on the corpus's metadata fields
 
 
 @dataclass

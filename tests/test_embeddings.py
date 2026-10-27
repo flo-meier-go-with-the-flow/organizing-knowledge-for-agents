@@ -41,5 +41,5 @@ def test_embed_keeps_input_order():
 
 
 def test_collection_name_is_chroma_safe():
-    assert collection_name("m0", "text-embedding-3-large") == "confluence-m0-text-embedding-3-large"
-    assert collection_name("m0", "org/my embedder") == "confluence-m0-org-my-embedder"
+    assert collection_name("original", "m0", "text-embedding-3-large") == "original-m0-text-embedding-3-large"
+    assert collection_name("removed-metadata", "m0", "org/my embedder") == "removed-metadata-m0-org-my-embedder"
