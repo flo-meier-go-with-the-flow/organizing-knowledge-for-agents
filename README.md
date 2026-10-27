@@ -29,6 +29,23 @@ These numbers are provisional:
 - **One run only.** Agent runs are nondeterministic, so differences of a few points between conditions need repeats.
 - **The `not_found` and `metadata` sets haven't been run yet.**
 
+### Findings
+
+**Question types.** EnterpriseRAG-Bench generates each type to test a different retrieval skill (definitions in its `methodology.md`):
+- **Basic:** one page, phrased without long exact matches.
+- **Semantic:** loose phrasing with few keywords or qualifiers, worded differently from the page that answers it.
+- **Constrained:** many pages look relevant, and qualifiers (a date, product, region) rule out all but a few.
+- **Completeness:** the answer is spread over several pages (6.2 on average here), and missing one breaks it.
+- **Other:** miscellaneous (off-topic pages in odd folders), intra-document reasoning (two distant parts of one page), project-related (several pages within one project) and conflicting info (a newer page supersedes an older one).
+
+**Every gold page is indexed.** All 134 gold references in `confluence` and all 12 in `metadata` are in the corpus and in Chroma, so no miss comes from a missing page. Six `confluence` gold pages are misfiled (`original_location` is set) and four are flagged as noise. The baseline answered 6 of 6 and 3 of 4 of those correctly, because search ignores folders. Report them separately in folder-navigation conditions.
+
+**Semantic questions mostly fail on outdated look-alikes.** 6 of the 15 were wrong:
+- In 4, the agent answered from an older page on the same topic, in the same folder. The gold page is the newer one in every case. For example, the agent used the Optimize Conductor 2.0 release notes instead of 4.0, and a 2025 policy ("2 business days") instead of the 2026 one ("72 business hours").
+- In those 4, the gold page never reached the top 5 for the agent's queries. The agent also can't see dates (`show_metadata = false`), so it couldn't have told current from outdated anyway. This is what the metadata-visible condition tests.
+- The agent's query rewrites can hurt. In `qst_0252`, the original question ranks the gold page #2, but the agent's rewrites (quoted phrases, keyword lists) ranked it 10th or lower.
+- In the other 2, the agent cited the right page and was judged wrong on a detail. These are borderline and may flip with a stronger judge.
+
 ## How the agent works
 
 A deliberately minimal harness: one model, three tools, a fixed tool budget.
